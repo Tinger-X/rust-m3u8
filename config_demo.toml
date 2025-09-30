@@ -1,0 +1,35 @@
+# Rust M3U8 下载器配置文件示例
+
+# 1. 通用系统配置
+[system]
+# 1.1 并发下载数量
+workers = 10
+# 1.2 失败重试次数（0表示无限重试）
+retry = 3
+# 1.3 代理池，配置方式为：`[地址, 权重]` 下载时按照权重分配，默认不开启（使用系统网络环境），示例：
+#    proxies = [
+#        ["http://127.0.0.1:7890", 100],
+#        ["http://127.0.0.1:7891", 50],
+#    ]
+proxies = []
+
+# 2. HTTP请求头配置
+[headers]
+User-Agent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+Accept = "*/*"
+Accept-Encoding = "gzip, deflate, br"
+Connection = "keep-alive"
+
+# 3. 广告过滤配置
+[filters]
+# 3.1 URL匹配正则表达式列表，示例:
+#    url_patterns = [
+#        "ad\\.example\\.com",
+#        ".*_ad\\.ts"
+#    ]
+url_patterns = []
+# 3.2 分辨率匹配，正片视频尺寸索引（数字表示正片分辨率种类下标，-1表示不根据分辨率过滤），示例：
+#     1：正片8min（1280*720），广告20s（1920*1080），正片15min（1280*720）...，则 `main_size_index=0`
+#     2：广告1min（1920*1080），正片35min（1280*720）。则 `main_size_index=1`
+#     也就是说 `main_size_index` 是种类次序下标，与正片分辨率不同的都被划分为广告
+main_size_index = -1
