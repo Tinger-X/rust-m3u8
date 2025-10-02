@@ -16,7 +16,7 @@ pub struct Cli {
     pub dest: Option<String>,
 
     /// 输出视频格式
-    #[arg(short = 'e', long = "ext", default_value = "mp4", help = "输出视频的后缀及保存格式，支持: mp4, avi, mkv, flv, ts")]
+    #[arg(short = 'e', long = "ext", default_value = "mp4", help = "输出视频的后缀及保存格式，支持: mp4(默认，当前仅支持), avi, mkv, flv, ts")]
     pub ext: String,
 
     /// 配置文件路径

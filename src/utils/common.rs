@@ -1,13 +1,10 @@
+use bytes::Bytes;
 use chrono::Utc;
-use md5::{Md5, Digest};
+use md5::{Digest, Md5};
 
 use crate::warn_fmt;
 
-pub struct Funcs {
-    pub ensure_extension: fn(&str, &str) -> String,
-    pub generate_default_filename: fn() -> String,
-    pub is_online_resource: fn(&str) -> bool,
-}
+pub struct Funcs;
 
 impl Funcs {
     /// 确保文件名有正确的扩展名，扩展名只能取：mp4, avi, mkv, flv, ts
@@ -21,7 +18,10 @@ impl Funcs {
                 }
             }
             _ => {
-                warn_fmt!("不支持的扩展名 '{}', 仅支持 mp4(默认), avi, mkv, flv, ts", extension);
+                warn_fmt!(
+                    "不支持的扩展名 '{}', 仅支持 mp4(默认，当前仅支持), avi, mkv, flv, ts",
+                    extension
+                );
                 format!("{}.{}", filename, "mp4")
             }
         }
@@ -41,5 +41,10 @@ impl Funcs {
         let mut hasher = Md5::new();
         hasher.update(s.as_bytes());
         format!("{:x}", hasher.finalize())
+    }
+
+    pub fn decode_video_size(data: &Bytes) -> Option<(u32, u32)> {
+        // 将Bytes转换为Cursor以便进行读取操作
+        None
     }
 }

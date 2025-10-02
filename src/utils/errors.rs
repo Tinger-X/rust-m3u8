@@ -20,8 +20,8 @@ pub enum M3u8Error {
     DownloadFailed(String),
 
     /// 迭代错误
-    #[error("Iterator error: {0}")]
-    IteratorError(String),
+    #[error("Empty content error: {0}")]
+    EmptyContent(String),
 
     /// 无效的HTTP头值
     #[error("Invalid HTTP header value: {0}")]
@@ -43,33 +43,13 @@ pub enum M3u8Error {
     #[error("M3U8 parse error: {0}")]
     M3U8Parse(String),
 
-    /// URL错误
-    #[error("Invalid URL: {0}")]
-    InvalidUrl(String),
-
-    /// 文件错误
-    #[error("File error: {0}")]
-    FileError(String),
-
     /// 进度条模板错误
     #[error("Progress bar template error: {0}")]
     TemplateError(#[from] TemplateError),
 
-    /// 配置错误
-    #[error("Config error: {0}")]
-    ConfigError(String),
-
     /// 配置解析错误
     #[error("Failed to parse config file: {0}")]
     ParseError(#[from] toml::de::Error),
-
-    /// 无效的配置值
-    #[error("Invalid config value: {0}")]
-    InvalidValue(String),
-    
-    /// 无效的配置值
-    #[error("Thread error: {0}")]
-    ThreadError(String),
 }
 
 /// 结果类型别名

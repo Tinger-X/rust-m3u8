@@ -1,4 +1,8 @@
+use bytes::Bytes;
 use reqwest::{Proxy, blocking::Client};
+use std::fs::OpenOptions;
+use std::io::Write;
+use std::sync::atomic::{AtomicU32, Ordering};
 use std::time::Duration;
 use url::Url;
 
@@ -9,7 +13,7 @@ use crate::utils::config::AppConfig;
 use crate::utils::errors::{M3u8Error, Result};
 use crate::utils::proxy::Proxies;
 use crate::utils::tmp_dir::TempDir;
-use crate::{error_fmt, warn_fmt};
+use crate::{error_fmt, info_fmt, warn_fmt};
 
 #[derive(Debug, Clone)]
 pub struct M3U8 {
@@ -23,8 +27,9 @@ pub struct M3U8 {
     tmp_dir: TempDir,
     proxies: Proxies,
 }
+
 impl M3U8 {
-    async fn read_m3u8_content(&self, src: &str, is_online: bool) -> Result<String> {
+    fn read_m3u8_content(&self, src: &str, is_online: bool) -> Result<String> {
         let m3u8_content;
         if is_online {
             let client = self.get_client()?;
@@ -40,12 +45,7 @@ impl M3U8 {
         Ok(m3u8_content.to_string())
     }
 
-    async fn parse_segments(
-        &mut self,
-        src: &str,
-        m3u8_content: &str,
-        is_online: bool,
-    ) -> Result<()> {
+    fn parse_segments(&mut self, src: &str, m3u8_content: &str, is_online: bool) -> Result<()> {
         for (index, &line) in m3u8_content
             .lines()
             .collect::<Vec<&str>>()
@@ -53,10 +53,7 @@ impl M3U8 {
             .enumerate()
         {
             let trimmed = line.trim();
-            if trimmed.is_empty()
-                || trimmed.starts_with("#")
-                || (!trimmed.ends_with(".ts") && !trimmed.ends_with(".m4s"))
-            {
+            if trimmed.is_empty() || trimmed.starts_with("#") {
                 continue;
             }
             let mut segment = Segment::new(trimmed.to_string());
@@ -71,8 +68,10 @@ impl M3U8 {
             if segment.is_ad {
                 self.ads += 1;
             } else {
-                self.need_downloads += 1;
-                segment.is_ok = self.tmp_dir.load(&index, &mut segment.data).await;
+                segment.is_ok = self.tmp_dir.load(&index, &mut segment.data);
+                if !segment.is_ok {
+                    self.need_downloads += 1;
+                }
             }
             self.segments.push(segment);
         }
@@ -98,24 +97,18 @@ impl M3U8 {
         Ok(client)
     }
 
-    async fn download_one(&mut self, index: usize) -> Result<()> {
+    fn download_one(&mut self, index: usize) -> Result<()> {
         for attempt in 0..=self.config.system.retry {
             let client = self.get_client()?;
 
-            match self.segments[index].download(&client).await {
+            match self.segments[index].download(&client) {
                 Ok(_) => {
                     self.tmp_dir.write(&index, &self.segments[index].data);
-                    self.downloaded += 1;
                     return Ok(());
                 }
-                Err(_) => {
+                Err(e) => {
                     if attempt == self.config.system.retry {
-                        warn_fmt!(
-                            "片段下载失败：{}， 重试次数 {}",
-                            &self.segments[index].url,
-                            attempt
-                        );
-                        self.errors += 1;
+                        warn_fmt!("index.[{}]下载失败：{}", &index, e);
                     }
                 }
             }
@@ -125,8 +118,16 @@ impl M3U8 {
 
         return Err(M3u8Error::DownloadFailed(format!(
             "下载片段 {} 失败",
-            &self.segments[index].url
+            &index
         )));
+    }
+
+    fn decode_video_size(&mut self) {
+        for segment in self.segments.iter_mut() {
+            if !segment.is_ad && segment.is_ok {
+                segment.size = Funcs::decode_video_size(&segment.data);
+            }
+        }
     }
 }
 
@@ -145,21 +146,38 @@ impl M3U8 {
         }
     }
 
-    pub async fn parse(&mut self, src: &str) -> Result<()> {
+    pub fn parse(&mut self, src: &str) -> Result<()> {
         self.proxies.init(&self.config.system.proxies);
 
         let is_online = Funcs::is_online_resource(src);
-        let m3u8_content = self.read_m3u8_content(src, is_online).await?;
+        let m3u8_content = self.read_m3u8_content(src, is_online)?;
 
         self.tmp_dir.init(&m3u8_content);
-        self.parse_segments(src, &m3u8_content, is_online).await?;
+        self.parse_segments(src, &m3u8_content, is_online)?;
 
         // 解析媒体播放列表
         Ok(())
     }
 
     /// 下载所有片段
-    pub async fn download(&mut self) -> Vec<Result<()>> {
+    pub fn download(&mut self) {
+        use indicatif::{ProgressBar, ProgressStyle};
+
+        // 创建进度条
+        let total_segments = self.need_downloads as u64;
+        let pb = ProgressBar::new(total_segments);
+
+        // 设置进度条样式，使用固定的变量而不是动态消息
+        let style = ProgressStyle::with_template("下载中：[{bar:50}] {percent:.2f}%, {msg}")
+            .unwrap()
+            .progress_chars("=> ");
+        pb.set_style(style);
+
+        // 使用原子变量来处理并发计数
+        let downloaded = AtomicU32::new(0);
+        let errors = AtomicU32::new(0);
+        let need_downloads = self.need_downloads;
+
         // 创建线程池
         let pool = match rayon::ThreadPoolBuilder::new()
             .num_threads(self.config.system.workers as usize)
@@ -167,24 +185,112 @@ impl M3U8 {
         {
             Ok(p) => p,
             Err(e) => {
-                return vec![Err(M3u8Error::ThreadError(format!(
-                    "创建线程池失败: {}",
-                    e
-                )))];
+                error_fmt!("创建线程池失败: {}", e);
+                return;
             }
         };
 
+        // 预先过滤出需要下载的片段
+        let segments_to_download: Vec<_> = (0..self.segments.len())
+            .filter(|&index| !self.segments[index].is_ad && !self.segments[index].is_ok)
+            .collect();
+
         // 并行下载所有视频
-        pool.install(|| {
-            self.segments
-                .iter()
-                .enumerate()
-                .map(async |(index, segment)| {
-                    self.download_one(index)
-                        .await
-                        .map_err(|e| format!("下载失败 {} (索引 {}): {}", segment.url, index, e))
-                })
-                .collect()
-        })
+        pool.scope(|s| {
+            for &index in &segments_to_download {
+                let m3u8_clone = self.clone();
+                let pb = pb.clone();
+                let downloaded = &downloaded;
+                let errors = &errors;
+                let need_downloads = need_downloads;
+
+                s.spawn(move |_| {
+                    let mut cloned = m3u8_clone;
+                    match cloned.download_one(index) {
+                        Ok(_) => {
+                            // 原子递增下载计数
+                            let current_downloaded = downloaded.fetch_add(1, Ordering::SeqCst) + 1;
+                            let current_errors = errors.load(Ordering::SeqCst);
+
+                            // 更新进度条位置
+                            pb.set_position(current_downloaded as u64);
+
+                            // 手动更新消息，以显示所有需要的信息
+                            pb.set_message(format!(
+                                "{}/{}, 失败: {}",
+                                current_downloaded, need_downloads, current_errors
+                            ));
+                        }
+                        Err(_) => {
+                            // 原子递增错误计数
+                            let current_errors = errors.fetch_add(1, Ordering::SeqCst) + 1;
+                            let current_downloaded = downloaded.load(Ordering::SeqCst);
+
+                            // 更新进度条消息
+                            pb.set_message(format!(
+                                "{}/{}, 失败: {}",
+                                current_downloaded, need_downloads, current_errors
+                            ));
+                        }
+                    }
+                });
+            }
+        });
+
+        // 更新最终计数到实例变量
+        self.downloaded += downloaded.load(Ordering::SeqCst);
+        self.errors += errors.load(Ordering::SeqCst);
+
+        // 完成进度条
+        pb.finish_with_message("下载完成");
+    }
+
+    pub fn filter_ads_by_size(&mut self) {
+        if self.config.filters.main_size_index < 0 {
+            return;
+        }
+        info_fmt!(
+            "根据视频分辨率过滤广告，正片索引: {}",
+            self.config.filters.main_size_index
+        );
+        self.decode_video_size();
+        self.filter.update_is_ad_by_size(&mut self.segments, self.config.filters.main_size_index as u32);
+    }
+
+    /// 将所有片段合并到指定文件
+    pub fn merge_to_file(&self, output_path: &str) -> Result<()> {
+        // 创建输出文件
+        let mut output_file = OpenOptions::new()
+            .write(true)
+            .create(true)
+            .truncate(true)
+            .open(output_path)?;
+
+        // 按顺序写入所有非广告片段
+        for (index, segment) in self.segments.iter().enumerate() {
+            if !segment.is_ad {
+                // 先尝试从内存中获取数据
+                if segment.is_ok {
+                    output_file.write_all(&segment.data)?;
+                } else {
+                    // 如果内存中没有，尝试从临时文件读取
+                    let mut data = Bytes::new();
+                    if self.tmp_dir.load(&index, &mut data) {
+                        output_file.write_all(&data)?;
+                    } else {
+                        warn_fmt!("无法获取片段 {} 的数据，跳过合并", index);
+                    }
+                }
+            }
+        }
+
+        output_file.flush()?;
+        warn_fmt!("视频已合并到: {}", output_path);
+        Ok(())
+    }
+
+    /// 清理临时文件
+    pub fn cleanup(&mut self) -> Result<()> {
+        self.tmp_dir.cleanup()
     }
 }

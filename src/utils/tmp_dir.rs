@@ -51,10 +51,10 @@ impl TempDir {
     }
 
     /// 写入文件
-    pub async fn write(&self, index: &usize, data: &Bytes) {
+    pub fn write(&self, index: &usize, data: &Bytes) {
         let path = self.get_file_path(index);
 
-        match async_std::fs::write(&path, data).await {
+        match std::fs::write(&path, data) {
             Ok(_) => {}
             Err(e) => {
                 error_fmt!("写入文件 {} 失败: {}", path.display(), e);
@@ -63,16 +63,20 @@ impl TempDir {
     }
 
     /// 加载文件内容
-    pub async fn load(&self, index: &usize, data: &mut Bytes) -> bool {
+    pub fn load(&self, index: &usize, data: &mut Bytes) -> bool {
         let path = self.get_file_path(index);
         if self.file_exists(index) {
-            match async_std::fs::read(&path).await {
+            match std::fs::read(&path) {
                 Ok(content) => {
+                    if content.is_empty() {
+                        warn_fmt!("片段 {} 内容为空", index);
+                        return false;
+                    }
                     *data = content.into();
                     true
                 }
                 Err(e) => {
-                    warn_fmt!("读取文件 {} 失败: {}", path.display(), e);
+                    warn_fmt!("读取片段 {} 失败: {}", index, e);
                     false
                 }
             }

@@ -25,7 +25,7 @@ impl Filter {
         self.url_patterns.iter().any(|pat| pat.is_match(url))
     }
 
-    pub fn update_is_ad_by_size(&self, _segments: &mut [Segment]) {
-        // TODO
+    pub fn update_is_ad_by_size(&self, segments: &mut [Segment], index: u32) {
+        // TODO：根据视频分辨率与配置的正片索引设置segments是否为广告
     }
 }

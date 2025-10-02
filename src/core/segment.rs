@@ -24,28 +24,25 @@ impl Segment {
         }
     }
 
-    pub async fn download(&mut self, client: &Client) -> Result<()> {
+    pub fn download(&mut self, client: &Client) -> Result<()> {
         match client.get(&self.url).send() {
             Ok(response) => {
                 match response.bytes() {
                     Ok(b) => {
+                        if b.is_empty() {
+                            return Err(M3u8Error::EmptyContent("内容为空".to_string()));
+                        }
                         self.data = b;
                         self.is_ok = true;
                         return Ok(());
                     }
                     Err(e) => {
-                        return Err(M3u8Error::DownloadFailed(format!(
-                            "读取响应内容失败 {}: {}",
-                            &self.url, e
-                        )));
+                        return Err(M3u8Error::DownloadFailed(e.to_string()));
                     }
                 }
             }
             Err(e) => {
-                return Err(M3u8Error::DownloadFailed(format!(
-                    "下载片段 {} 失败: {}",
-                    &self.url, e
-                )));
+                return Err(M3u8Error::DownloadFailed(e.to_string()));
             }
         }
     }
