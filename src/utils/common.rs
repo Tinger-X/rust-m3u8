@@ -1,6 +1,8 @@
 use chrono::Utc;
 use md5::{Md5, Digest};
 
+use crate::warn_fmt;
+
 pub struct Funcs {
     pub ensure_extension: fn(&str, &str) -> String,
     pub generate_default_filename: fn() -> String,
@@ -18,7 +20,10 @@ impl Funcs {
                     format!("{}.{}", filename, extension)
                 }
             }
-            _ => panic!("不支持的扩展名，仅支持 mp4, avi, mkv, flv, ts"),
+            _ => {
+                warn_fmt!("不支持的扩展名 '{}', 仅支持 mp4(默认), avi, mkv, flv, ts", extension);
+                format!("{}.{}", filename, "mp4")
+            }
         }
     }
 

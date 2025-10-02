@@ -1,7 +1,7 @@
 use regex::Regex;
 
-use crate::utils::config::AdFilterConfig;
 use super::segment::Segment;
+use crate::utils::config::AdFilterConfig;
 
 #[derive(Debug, Clone)]
 pub struct Filter {
@@ -25,7 +25,7 @@ impl Filter {
         self.url_patterns.iter().any(|pat| pat.is_match(url))
     }
 
-    pub fn update_is_ad_by_size(&self, segments: &mut [Segment]) {
+    pub fn update_is_ad_by_size(&self, _segments: &mut [Segment]) {
         // TODO
     }
 }

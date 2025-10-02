@@ -1,9 +1,11 @@
-use md5::{Digest, Md5};
 use std::env;
 use std::fs;
 use std::path::PathBuf;
+use bytes::Bytes;
 
+use super::common::Funcs;
 use super::errors::Result;
+use crate::{error_fmt, warn_fmt};
 
 /// 临时文件夹管理器
 #[derive(Debug, Clone)]
@@ -13,11 +15,19 @@ pub struct TempDir {
 
 fn generate_temp_dir(content: &str) -> PathBuf {
     let mut temp_dir = env::temp_dir();
-    let mut hasher = Md5::new();
-    hasher.update(content.as_bytes());
-    let filename = format!("rust_m3u8_{:x}", hasher.finalize());
+    let filename = format!("rust_m3u8_{}", Funcs::content_digest(content));
     temp_dir.push(filename);
     temp_dir
+}
+
+impl TempDir {
+    fn get_file_path(&self, index: &usize) -> PathBuf {
+        self.path.clone().join(format!("{:08}.ts", index))
+    }
+
+    fn file_exists(&self, index: &usize) -> bool {
+        self.get_file_path(index).exists()
+    }
 }
 
 impl TempDir {
@@ -27,44 +37,59 @@ impl TempDir {
         }
     }
 
-    pub fn init(&mut self, content: &str) -> Result<()> {
+    pub fn init(&mut self, content: &str) {
         let temp_dir = generate_temp_dir(&content);
         if !temp_dir.exists() {
-            fs::create_dir_all(&temp_dir)?;
+            match fs::create_dir_all(&temp_dir) {
+                Ok(_) => {}
+                Err(e) => {
+                    error_fmt!("创建临时文件夹 {} 失败: {}", temp_dir.display(), e);
+                }
+            }
         }
         self.path = temp_dir;
-        Ok(())
-    }
-
-    pub fn get_file_path(&self, index: &u32) -> PathBuf {
-        self.path.join(format!("{:08}.ts", index))
-    }
-
-    pub fn file_exists(&self, index: &u32) -> bool {
-        self.get_file_path(index).exists()
     }
 
     /// 写入文件
-    pub async fn write(&self, index: &u32, data: &[u8]) -> Result<()> {
-        let path = self.path.join(format!("{:08}.ts", index));
-        async_std::fs::write(path, data).await?;
-        Ok(())
+    pub async fn write(&self, index: &usize, data: &Bytes) {
+        let path = self.get_file_path(index);
+
+        match async_std::fs::write(&path, data).await {
+            Ok(_) => {}
+            Err(e) => {
+                error_fmt!("写入文件 {} 失败: {}", path.display(), e);
+            }
+        }
     }
 
     /// 加载文件内容
-    pub async fn load(&self, index: &u32, data: &mut Vec<u8>) -> Result<bool> {
+    pub async fn load(&self, index: &usize, data: &mut Bytes) -> bool {
+        let path = self.get_file_path(index);
         if self.file_exists(index) {
-            let path = self.path.join(format!("{:08}.ts", index));
-            *data = async_std::fs::read(path).await?;
-            return Ok(true);
+            match async_std::fs::read(&path).await {
+                Ok(content) => {
+                    *data = content.into();
+                    true
+                }
+                Err(e) => {
+                    warn_fmt!("读取文件 {} 失败: {}", path.display(), e);
+                    false
+                }
+            }
+        } else {
+            false
         }
-        Ok(false)
     }
 
     /// 完整下载后清理临时文件夹
     pub fn cleanup(&mut self) -> Result<()> {
         if self.path.exists() {
-            fs::remove_dir_all(&self.path)?;
+            match fs::remove_dir_all(&self.path) {
+                Ok(_) => {}
+                Err(e) => {
+                    warn_fmt!("删除临时文件夹 {} 失败: {}", self.path.display(), e);
+                }
+            }
         }
         Ok(())
     }

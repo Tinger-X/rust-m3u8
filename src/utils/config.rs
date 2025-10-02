@@ -2,6 +2,8 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
 use super::errors::Result;
+use super::logger::LogLevel;
+use crate::warn_fmt;
 
 /// 系统配置
 #[derive(Debug, Deserialize, Serialize, Clone)]
@@ -10,6 +12,7 @@ pub struct SystemConfig {
     pub workers: u32,
     pub retry: u32,
     pub proxies: Vec<(String, u32)>,
+    pub log_level: LogLevel,
 }
 
 impl Default for SystemConfig {
@@ -18,6 +21,7 @@ impl Default for SystemConfig {
             workers: 10,
             retry: 3,
             proxies: Vec::new(),
+            log_level: LogLevel::Info,
         }
     }
 }
@@ -73,14 +77,27 @@ impl Default for AppConfig {
 }
 
 impl AppConfig {
-    pub fn parse(src: &Option<String>) -> Result<Self> {
+    pub fn parse(src: &Option<String>) -> Self {
+        match Self::inner_parse(src) {
+            Ok(config) => config,
+            Err(e) => {
+                warn_fmt!("解析配置文件失败: {}", e);
+                AppConfig::default()
+            }
+        }
+    }
+
+    fn inner_parse(src: &Option<String>) -> Result<Self> {
         let config = match src {
             Some(path) => {
                 let content = std::fs::read_to_string(path)?;
                 let mut config: AppConfig = toml::from_str(&content)?;
                 if config.system.workers == 0 {
-                    eprintln!("警告：workers 配置为 0，已设置为默认值 10");
+                    warn_fmt!("使用默认 workers: 10");
                     config.system.workers = 10;
+                }
+                if config.system.retry == 0 {
+                    config.system.retry = u32::MAX;
                 }
 
                 let default = AppConfig::default();

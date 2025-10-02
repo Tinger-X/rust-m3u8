@@ -1,4 +1,6 @@
 use clap::Parser;
+
+use crate::warn_fmt;
 use super::config::AppConfig;
 
 /// M3U8下载器命令行参数
@@ -35,7 +37,7 @@ impl Cli {
             if let Some((key, value)) = header.split_once(':') {
                 config.headers.insert(key.trim().to_string(), value.trim().to_string());
             } else {
-                eprint!("警告：已忽略无法解析的请求头：{}", header);
+                warn_fmt!("已忽略无法解析的请求头：{}", header);
             }
         }
     }

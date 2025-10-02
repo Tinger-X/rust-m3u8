@@ -12,6 +12,7 @@ retry = 3
 #        ["http://127.0.0.1:7891", 50],
 #    ]
 proxies = []
+log_level = "trace"
 
 # 2. HTTP请求头配置
 [headers]

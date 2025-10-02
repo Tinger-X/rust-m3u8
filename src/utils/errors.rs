@@ -15,6 +15,14 @@ pub enum M3u8Error {
     #[error("HTTP request error: {0}")]
     HttpRequest(#[from] ReqwestError),
 
+    /// 下载失败
+    #[error("Download failed: {0}")]
+    DownloadFailed(String),
+
+    /// 迭代错误
+    #[error("Iterator error: {0}")]
+    IteratorError(String),
+
     /// 无效的HTTP头值
     #[error("Invalid HTTP header value: {0}")]
     InvalidHeader(#[from] reqwest::header::InvalidHeaderValue),
@@ -58,6 +66,10 @@ pub enum M3u8Error {
     /// 无效的配置值
     #[error("Invalid config value: {0}")]
     InvalidValue(String),
+    
+    /// 无效的配置值
+    #[error("Thread error: {0}")]
+    ThreadError(String),
 }
 
 /// 结果类型别名
