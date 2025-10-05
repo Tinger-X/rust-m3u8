@@ -1,0 +1,148 @@
+name: Release Build
+
+on:
+  push:
+    tags:
+      - "v*" # 触发条件：当推送 v 开头的标签时
+
+jobs:
+  build:
+    strategy:
+      matrix:
+        # 定义目标平台列表
+        target: [
+          x86_64-pc-windows-msvc,
+          x86_64-apple-darwin,
+          aarch64-apple-darwin,
+          x86_64-unknown-linux-gnu,
+          aarch64-unknown-linux-gnu,
+          x86_64-unknown-linux-musl,
+          aarch64-unknown-linux-musl,
+        ]
+        include:
+          # 为每个目标平台指定对应的操作系统和文件后缀
+          - target: x86_64-pc-windows-msvc
+            os: windows-latest
+            suffix: .exe
+            archive: zip
+            archive_name: rust-m3u8-windows-x86_64.zip
+          - target: x86_64-apple-darwin
+            os: macos-latest
+            suffix: ""
+            archive: tar.gz
+            archive_name: rust-m3u8-macos-intel.tar.gz
+          - target: aarch64-apple-darwin
+            os: macos-latest
+            suffix: ""
+            archive: tar.gz
+            archive_name: rust-m3u8-macos-arm.tar.gz
+          - target: x86_64-unknown-linux-gnu
+            os: ubuntu-latest
+            suffix: ""
+            archive: tar.gz
+            archive_name: rust-m3u8-linux-x86_64.tar.gz
+          - target: aarch64-unknown-linux-gnu
+            os: ubuntu-latest
+            suffix: ""
+            archive: tar.gz
+            archive_name: rust-m3u8-linux-arm64.tar.gz
+          - target: x86_64-unknown-linux-musl
+            os: ubuntu-latest
+            suffix: ""
+            archive: tar.gz
+            archive_name: rust-app-linux-static-x86_64.tar.gz
+          - target: aarch64-unknown-linux-musl
+            os: ubuntu-latest
+            suffix: ""
+            archive: tar.gz
+            archive_name: rust-app-linux-static-arm64.tar.gz
+
+    runs-on: ${{ matrix.os }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Cache cargo registry
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+
+      - name: Install Rust
+        uses: actions-rs/toolchain@v1
+        with:
+          toolchain: stable
+          target: ${{ matrix.target }}
+          profile: minimal
+
+      - name: Build release binary
+        run: cargo build --release --target ${{ matrix.target }}
+
+      - name: Prepare artifacts
+        run: |
+          BIN_NAME="rust-m3u8${{ matrix.suffix}}"
+          mkdir release
+          cp target/${{ matrix.target }}/release/$BIN_NAME release/
+          
+          # 添加执行权限 (非Windows平台)
+          if [ "${{ matrix.os }}" != "windows-latest" ]; then
+            chmod +x release/$BIN_NAME
+          fi
+          
+          # 创建README说明文件
+          echo "运行说明：" > release/README.txt
+          if [ "${{ matrix.os }}" == "windows-latest" ]; then
+            echo "直接运行: rust-m3u8.exe [OPTIONS] <SRC>" >> release/README.txt
+          else
+            echo "1. 解压后运行: chmod +x rust-m3u8" >> release/README.txt
+            echo "2. 执行: ./rust-m3u8 [OPTIONS] <SRC>" >> release/README.txt
+          fi
+
+      - name: Create release archive
+        run: |
+          if [ "${{ matrix.archive }}" == "zip" ]; then
+            zip -r ${{ matrix.archive_name }} release/*
+          else
+            tar czvf ${{ matrix.archive_name }} -C release .
+          fi
+      
+      - name: Generate checksum
+        run: |
+          if [ "${{ runner.os }}" == "Windows" ]; then
+            certutil -hashfile ${{ matrix.archive_name }} SHA256 > ${{ matrix.archive_name }}.sha256
+          else
+            shasum -a 256 ${{ matrix.archive_name }} > ${{ matrix.archive_name }}.sha256
+          fi
+
+      - name: Upload checksum
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.archive_name }}.sha256
+          path: ${{ matrix.archive_name }}.sha256
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.archive_name }}
+          path: ${{ matrix.archive_name }}
+
+  create-release:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: ${{ github.ref }}
+          name: Release ${{ github.ref_name }}
+          files: artifacts/*
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
