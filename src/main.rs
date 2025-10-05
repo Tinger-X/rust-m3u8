@@ -33,7 +33,7 @@ fn run(cli: &Cli, config: &AppConfig) -> Result<()> {
     );
 
     // 下载片段
-    info_fmt!("开始下载片段，使用 {} 线程", config.system.workers);
+    info_fmt!("开始下载片段，使用 {} 线程，代理: {}", config.system.workers, m3u8.proxy.proxies.len());
     m3u8.download();
     info_fmt!("下载完成，成功: {}, 失败: {}", m3u8.downloaded, m3u8.errors);
     m3u8.filter_ads_by_size();

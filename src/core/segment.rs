@@ -25,24 +25,16 @@ impl Segment {
     }
 
     pub fn download(&mut self, client: &Client) -> Result<()> {
-        match client.get(&self.url).send() {
-            Ok(response) => match response.bytes() {
-                Ok(b) => {
-                    if b.is_empty() {
-                        return Err(M3u8Error::EmptyContent("内容为空".to_string()));
-                    }
-                    self.data = b;
-                    self.is_ok = true;
-                    return Ok(());
-                }
-                Err(e) => {
-                    return Err(M3u8Error::DownloadFailed(e.to_string()));
-                }
-            },
-            Err(e) => {
-                return Err(M3u8Error::DownloadFailed(e.to_string()));
-            }
+        let response = client.get(&self.url).send()?;
+        if !response.status().is_success() {
+            return Err(M3u8Error::DownloadFailed(format!("下载失败，状态码：{}", response.status())));
         }
+        self.data = response.bytes()?;
+        if self.data.is_empty() {
+            return Err(M3u8Error::EmptyContent("内容为空".to_string()));
+        }
+        self.is_ok = true;
+        Ok(())
     }
 
     pub fn _decode_resolution(&mut self) -> Result<()> {

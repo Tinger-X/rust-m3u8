@@ -4,7 +4,7 @@ use crate::{trace_fmt, debug_fmt};
 
 #[derive(Debug, Clone)]
 pub struct Proxies {
-    proxies: Vec<String>,
+    pub proxies: Vec<String>,
     dist: Option<WeightedIndex<u32>>,
 }
 

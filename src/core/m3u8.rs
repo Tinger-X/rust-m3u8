@@ -23,17 +23,17 @@ pub struct M3U8 {
     pub errors: u32,
     pub need_downloads: u32,
     pub downloaded: u32,
+    pub proxy: Proxies,
     config: AppConfig,
     filter: Filter,
     tmp_dir: TempDir,
-    proxies: Proxies,
 }
 
-fn read_m3u8_content(src: &str, proxies: &Proxies) -> Result<String> {
+fn read_m3u8_content(src: &str, proxy: &Proxies) -> Result<String> {
     trace_fmt!("开始读取M3U8文件: {}", src);
     let m3u8_content;
     if Funcs::is_online_resource(src) {
-        let client = get_client(proxies)?;
+        let client = get_client(proxy)?;
         let response = client.get(src).send()?;
         m3u8_content = response.text()?;
     } else {
@@ -47,13 +47,13 @@ fn read_m3u8_content(src: &str, proxies: &Proxies) -> Result<String> {
     Ok(m3u8_content.to_string())
 }
 
-fn get_client(proxies: &Proxies) -> Result<Client> {
+fn get_client(proxy: &Proxies) -> Result<Client> {
     // 创建HTTP客户端
     let client_builder = Client::builder()
         .timeout(Duration::from_secs(30)) // 设置超时时间
         .connect_timeout(Duration::from_secs(10)); // 设置连接超时时间
 
-    let client = match proxies.select() {
+    let client = match proxy.select() {
         Some(proxy_url) => match Proxy::http(proxy_url) {
             Ok(proxy) => client_builder.proxy(proxy).build()?,
             Err(e) => {
@@ -68,8 +68,10 @@ fn get_client(proxies: &Proxies) -> Result<Client> {
 
 impl M3U8 {
     fn parse_segments(&mut self, src: &str, m3u8_content: &str) -> Result<()> {
-        let src_url = Url::parse(&src)?;
-        let src_base = src_url.as_str().trim_end_matches('/');
+        let base_url = match self.config.system.base_url.as_deref() {
+            Some(base_url) => Url::parse(base_url)?,
+            None => Url::parse(src)?,
+        };
         for (index, &line) in m3u8_content
             .lines()
             .collect::<Vec<&str>>()
@@ -83,14 +85,7 @@ impl M3U8 {
             let mut segment = Segment::new(trimmed.to_string());
             let is_seg_online = Funcs::is_online_resource(trimmed);
             if !is_seg_online {
-                match self.config.system.base_url.as_deref() {
-                    Some(base_url) => {
-                        segment.url = format!("{}/{}", base_url, trimmed.trim_start_matches('/'));
-                    }
-                    None => {
-                        segment.url = format!("{}/{}", src_base, trimmed.trim_start_matches('/'));
-                    }
-                }
+                segment.url = base_url.join(trimmed)?.to_string();
             }
             segment.is_ad = self.filter.is_ad_by_url(&segment.url);
             if segment.is_ad {
@@ -108,7 +103,7 @@ impl M3U8 {
 
     fn download_one(&mut self, index: usize) -> Result<()> {
         for attempt in 0..=self.config.system.retry {
-            let client = get_client(&self.proxies)?;
+            let client = get_client(&self.proxy)?;
 
             match self.segments[index].download(&client) {
                 Ok(_) => {
@@ -117,6 +112,7 @@ impl M3U8 {
                 }
                 Err(e) => {
                     if attempt == self.config.system.retry {
+                        debug_fmt!("下载失败：{}", self.segments[index].url);
                         warn_fmt!("index.[{}]下载失败：{}", &index, e);
                     }
                 }
@@ -148,8 +144,8 @@ impl M3U8 {
 impl M3U8 {
     pub fn parse(src: &str, config: &AppConfig) -> Result<Self> {
         trace_fmt!("开始解析M3U8文件: {}", src);
-        let proxies = Proxies::parse(&config.system.proxies);
-        let m3u8_content = read_m3u8_content(src, &proxies)?;
+        let proxy = Proxies::parse(&config.system.proxies);
+        let m3u8_content = read_m3u8_content(src, &proxy)?;
 
         let mut m3u8 = Self {
             segments: Vec::new(),
@@ -160,7 +156,7 @@ impl M3U8 {
             config: config.clone(),
             filter: Filter::parse(&config.filters),
             tmp_dir: TempDir::parse(&m3u8_content),
-            proxies: proxies,
+            proxy: proxy,
         };
 
         m3u8.parse_segments(&src, &m3u8_content)?;
@@ -174,7 +170,8 @@ impl M3U8 {
         let pb = ProgressBar::new(total_segments);
 
         // 设置进度条样式，使用固定的变量而不是动态消息
-        let style = ProgressStyle::with_template("下载中：[{bar:50}] {percent:.2f}%, {msg}")
+        let style = ProgressStyle::with_template(
+            "下载中：{spinner:.green} [{elapsed_precise}] [{bar:40.cyan/blue}] {pos}/{len} ({percent:.2}%), {msg}")
             .unwrap()
             .progress_chars("=> ");
         pb.set_style(style);
@@ -182,7 +179,6 @@ impl M3U8 {
         // 使用原子变量来处理并发计数
         let downloaded = AtomicU32::new(0);
         let errors = AtomicU32::new(0);
-        let need_downloads = self.need_downloads;
 
         // 创建线程池
         let pool = match rayon::ThreadPoolBuilder::new()
@@ -208,7 +204,6 @@ impl M3U8 {
                 let pb = pb.clone();
                 let downloaded = &downloaded;
                 let errors = &errors;
-                let need_downloads = need_downloads;
 
                 s.spawn(move |_| {
                     let mut cloned = m3u8_clone;
@@ -220,23 +215,16 @@ impl M3U8 {
 
                             // 更新进度条位置
                             pb.set_position(current_downloaded as u64);
-
-                            // 手动更新消息，以显示所有需要的信息
-                            pb.set_message(format!(
-                                "{}/{}, 失败: {}",
-                                current_downloaded, need_downloads, current_errors
-                            ));
+                            pb.set_message(format!("{:05}.ts, 失败: {}", index, current_errors));
                         }
                         Err(_) => {
                             // 原子递增错误计数
-                            let current_errors = errors.fetch_add(1, Ordering::SeqCst) + 1;
                             let current_downloaded = downloaded.load(Ordering::SeqCst);
+                            let current_errors = errors.fetch_add(1, Ordering::SeqCst) + 1;
 
                             // 更新进度条消息
-                            pb.set_message(format!(
-                                "{}/{}, 失败: {}",
-                                current_downloaded, need_downloads, current_errors
-                            ));
+                            pb.set_position(current_downloaded as u64);
+                            pb.set_message(format!("{:05}.ts, 失败: {}", index, current_errors));
                         }
                     }
                 });
