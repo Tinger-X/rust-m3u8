@@ -100,3 +100,9 @@ url_patterns = []
 #    Default: false
 resolution = false
 ```
+
+## TODO
+
++ decode `ts` Bytes into frame size, supoort resolution ads filter
++ support other output video format
++ optimize cross platform build
