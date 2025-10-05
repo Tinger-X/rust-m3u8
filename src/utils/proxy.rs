@@ -1,5 +1,7 @@
 use rand::distr::{Distribution, weighted::WeightedIndex};
 
+use crate::{trace_fmt, debug_fmt};
+
 #[derive(Debug, Clone)]
 pub struct Proxies {
     proxies: Vec<String>,
@@ -7,30 +9,30 @@ pub struct Proxies {
 }
 
 impl Proxies {
-    /// 创建新的代理选择器，过滤掉权重为0的代理，并创建加权分布
-    pub fn new() -> Self {
-        Self {
-            proxies: Vec::new(),
-            dist: None,
-        }
-    }
-
-    /// 初始化的代理选择器，过滤掉权重为0的代理，并创建加权分布
-    pub fn init(&mut self, proxies: &Vec<(String, u32)>) {
+    pub fn parse(proxies: &Vec<(String, u32)>) -> Self {
+        trace_fmt!("开始解析代理");
         let valid_proxies: Vec<_> = proxies
             .into_iter()
             .filter(|(_, weight)| *weight > 0)
             .collect();
+        debug_fmt!("有效代理数: {}", valid_proxies.len());
         if valid_proxies.is_empty() {
-            return;
+            return Self {
+                proxies: Vec::new(),
+                dist: None,
+            };
         }
 
         let weights: Vec<_> = valid_proxies.iter().map(|(_, w)| *w).collect();
-        self.proxies = valid_proxies
+        let proxies = valid_proxies
             .into_iter()
             .map(|(url, _)| url.clone())
             .collect();
-        self.dist = WeightedIndex::new(&weights).ok();
+        let dist = WeightedIndex::new(&weights).ok();
+        Self {
+            proxies,
+            dist,
+        }
     }
     
     /// 根据权重随机选择一个代理

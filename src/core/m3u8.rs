@@ -1,10 +1,10 @@
 use bytes::Bytes;
+use indicatif::{ProgressBar, ProgressStyle};
 use reqwest::{Proxy, blocking::Client};
 use std::fs::OpenOptions;
 use std::io::Write;
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::time::Duration;
-use url::Url;
 
 use super::filter::Filter;
 use super::segment::Segment;
@@ -13,7 +13,7 @@ use crate::utils::config::AppConfig;
 use crate::utils::errors::{M3u8Error, Result};
 use crate::utils::proxy::Proxies;
 use crate::utils::tmp_dir::TempDir;
-use crate::{error_fmt, info_fmt, warn_fmt};
+use crate::{debug_fmt, error_fmt, trace_fmt, warn_fmt};
 
 #[derive(Debug, Clone)]
 pub struct M3U8 {
@@ -28,24 +28,45 @@ pub struct M3U8 {
     proxies: Proxies,
 }
 
-impl M3U8 {
-    fn read_m3u8_content(&self, src: &str, is_online: bool) -> Result<String> {
-        let m3u8_content;
-        if is_online {
-            let client = self.get_client()?;
-            let response = client.get(src).send()?;
-            m3u8_content = response.text()?;
-        } else {
-            m3u8_content = std::fs::read_to_string(src)?;
-        }
-        let m3u8_content = m3u8_content.trim();
-        if !m3u8_content.starts_with("#EXTM3U") || !m3u8_content.ends_with("#EXT-X-ENDLIST") {
-            return Err(M3u8Error::M3U8Parse("Not a valid M3U8 file".to_string()));
-        }
-        Ok(m3u8_content.to_string())
+fn read_m3u8_content(src: &str, proxies: &Proxies) -> Result<String> {
+    trace_fmt!("开始读取M3U8文件: {}", src);
+    let m3u8_content;
+    if Funcs::is_online_resource(src) {
+        let client = get_client(proxies)?;
+        let response = client.get(src).send()?;
+        m3u8_content = response.text()?;
+    } else {
+        m3u8_content = std::fs::read_to_string(src)?;
     }
+    let m3u8_content = m3u8_content.trim();
+    if !m3u8_content.starts_with("#EXTM3U") || !m3u8_content.ends_with("#EXT-X-ENDLIST") {
+        return Err(M3u8Error::M3U8Parse("Not a valid M3U8 file".to_string()));
+    }
+    debug_fmt!("M3U8内容长度: {}", m3u8_content.len());
+    Ok(m3u8_content.to_string())
+}
 
-    fn parse_segments(&mut self, src: &str, m3u8_content: &str, is_online: bool) -> Result<()> {
+fn get_client(proxies: &Proxies) -> Result<Client> {
+    // 创建HTTP客户端
+    let client_builder = Client::builder()
+        .timeout(Duration::from_secs(30)) // 设置超时时间
+        .connect_timeout(Duration::from_secs(10)); // 设置连接超时时间
+
+    let client = match proxies.select() {
+        Some(proxy_url) => match Proxy::all(proxy_url) {
+            Ok(proxy) => client_builder.proxy(proxy).build()?,
+            Err(e) => {
+                warn_fmt!("代理配置错误 {}: {}", proxy_url, e);
+                client_builder.build()?
+            }
+        },
+        None => client_builder.build()?,
+    };
+    Ok(client)
+}
+
+impl M3U8 {
+    fn parse_segments(&mut self, m3u8_content: &str) -> Result<()> {
         for (index, &line) in m3u8_content
             .lines()
             .collect::<Vec<&str>>()
@@ -59,10 +80,14 @@ impl M3U8 {
             let mut segment = Segment::new(trimmed.to_string());
             let is_seg_online = Funcs::is_online_resource(trimmed);
             if !is_seg_online {
-                if !is_online {
-                    error_fmt!("本地M3U8文件仅支持绝对HTTP/HTTPS的TS文件");
+                match self.config.system.base_url.as_deref() {
+                    Some(base_url) => {
+                        segment.url = format!("{}/{}", base_url, trimmed.trim_start_matches('/'));
+                    }
+                    None => {
+                        error_fmt!("TS片段 {} 不是绝对URL，且未配置 base_url", trimmed);
+                    }
                 }
-                segment.url = Url::parse(src)?.join(trimmed)?.to_string();
             }
             segment.is_ad = self.filter.is_ad_by_url(&segment.url);
             if segment.is_ad {
@@ -78,28 +103,9 @@ impl M3U8 {
         Ok(())
     }
 
-    fn get_client(&self) -> Result<Client> {
-        // 创建HTTP客户端
-        let client_builder = Client::builder()
-            .timeout(Duration::from_secs(30)) // 设置超时时间
-            .connect_timeout(Duration::from_secs(10)); // 设置连接超时时间
-
-        let client = match self.proxies.select() {
-            Some(proxy_url) => match Proxy::all(proxy_url) {
-                Ok(proxy) => client_builder.proxy(proxy).build()?,
-                Err(e) => {
-                    warn_fmt!("代理配置错误 {}: {}", proxy_url, e);
-                    client_builder.build()?
-                }
-            },
-            None => client_builder.build()?,
-        };
-        Ok(client)
-    }
-
     fn download_one(&mut self, index: usize) -> Result<()> {
         for attempt in 0..=self.config.system.retry {
-            let client = self.get_client()?;
+            let client = get_client(&self.proxies)?;
 
             match self.segments[index].download(&client) {
                 Ok(_) => {
@@ -122,47 +128,44 @@ impl M3U8 {
         )));
     }
 
-    fn decode_video_size(&mut self) {
+    fn _decode_video_size(&mut self) {
         for segment in self.segments.iter_mut() {
             if !segment.is_ad && segment.is_ok {
-                segment.size = Funcs::decode_video_size(&segment.data);
+                match segment._decode_resolution() {
+                    Ok(_) => {}
+                    Err(e) => {
+                        error_fmt!("解析片段分辨率失败：{}", e);
+                    }
+                }
             }
         }
     }
 }
 
 impl M3U8 {
-    pub fn new(config: &AppConfig) -> Self {
-        Self {
+    pub fn parse(src: &str, config: &AppConfig) -> Result<Self> {
+        trace_fmt!("开始解析M3U8文件: {}", src);
+        let proxies = Proxies::parse(&config.system.proxies);
+        let m3u8_content = read_m3u8_content(src, &proxies)?;
+
+        let mut m3u8 = Self {
             segments: Vec::new(),
             ads: 0,
             errors: 0,
             need_downloads: 0,
             downloaded: 0,
             config: config.clone(),
-            filter: Filter::new(&config.filters),
-            tmp_dir: TempDir::new(),
-            proxies: Proxies::new(),
-        }
-    }
+            filter: Filter::parse(&config.filters),
+            tmp_dir: TempDir::parse(&m3u8_content),
+            proxies: proxies,
+        };
 
-    pub fn parse(&mut self, src: &str) -> Result<()> {
-        self.proxies.init(&self.config.system.proxies);
-
-        let is_online = Funcs::is_online_resource(src);
-        let m3u8_content = self.read_m3u8_content(src, is_online)?;
-
-        self.tmp_dir.init(&m3u8_content);
-        self.parse_segments(src, &m3u8_content, is_online)?;
-
-        // 解析媒体播放列表
-        Ok(())
+        m3u8.parse_segments(&m3u8_content)?;
+        Ok(m3u8)
     }
 
     /// 下载所有片段
     pub fn download(&mut self) {
-        use indicatif::{ProgressBar, ProgressStyle};
-
         // 创建进度条
         let total_segments = self.need_downloads as u64;
         let pb = ProgressBar::new(total_segments);
@@ -246,15 +249,13 @@ impl M3U8 {
     }
 
     pub fn filter_ads_by_size(&mut self) {
-        if self.config.filters.main_size_index < 0 {
+        if !self.config.filters.resolution {
             return;
         }
-        info_fmt!(
-            "根据视频分辨率过滤广告，正片索引: {}",
-            self.config.filters.main_size_index
-        );
-        self.decode_video_size();
-        self.filter.update_is_ad_by_size(&mut self.segments, self.config.filters.main_size_index as u32);
+        error_fmt!("当前不支持根据视频分辨率过滤广告");
+        // TODO: 实现根据视频分辨率过滤广告
+        // self._decode_video_size();
+        // self.filter._update_is_ad_by_size(&mut self.segments);
     }
 
     /// 将所有片段合并到指定文件
@@ -285,7 +286,6 @@ impl M3U8 {
         }
 
         output_file.flush()?;
-        warn_fmt!("视频已合并到: {}", output_path);
         Ok(())
     }
 

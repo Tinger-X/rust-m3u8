@@ -83,21 +83,6 @@ impl Logger {
         config.level = level;
     }
 
-    // 通用日志方法
-    pub fn log<T: fmt::Display>(&self, level: LogLevel, message: T) {
-        let config = self.config.lock().unwrap();
-        if level < config.level {
-            return;
-        }
-
-        let time = chrono::Local::now().format("%Y-%m-%d %H:%M:%S");
-        println!("[{}] [{}] {}", time, level, message);
-        if level == LogLevel::Error {
-            drop(config);
-            exit(-1);
-        }
-    }
-
     // 带格式化的日志方法，支持模板和任意变量
     pub fn log_fmt(&self, level: LogLevel, args: fmt::Arguments<'_>) {
         let config = self.config.lock().unwrap();
@@ -111,27 +96,6 @@ impl Logger {
             drop(config);
             exit(-1);
         }
-    }
-
-    // 以下是各种日志级别的便捷方法
-    pub fn trace<T: fmt::Display>(&self, message: T) {
-        self.log(LogLevel::Trace, message);
-    }
-
-    pub fn debug<T: fmt::Display>(&self, message: T) {
-        self.log(LogLevel::Debug, message);
-    }
-
-    pub fn info<T: fmt::Display>(&self, message: T) {
-        self.log(LogLevel::Info, message);
-    }
-
-    pub fn warn<T: fmt::Display>(&self, message: T) {
-        self.log(LogLevel::Warn, message);
-    }
-
-    pub fn error<T: fmt::Display>(&self, message: T) {
-        self.log(LogLevel::Error, message);
     }
 
     // 带格式化的便捷方法
@@ -156,31 +120,9 @@ impl Logger {
     }
 }
 
-// 为了方便使用，创建全局日志记录器
-// 关键修改：添加pub关键字使GLOBAL_LOGGER可以被宏访问
+// 全局日志记录器
 lazy_static! {
     pub static ref GLOBAL_LOGGER: Logger = Logger::default();
-}
-
-// 全局日志函数
-pub fn trace<T: fmt::Display>(message: T) {
-    GLOBAL_LOGGER.trace(message);
-}
-
-pub fn debug<T: fmt::Display>(message: T) {
-    GLOBAL_LOGGER.debug(message);
-}
-
-pub fn info<T: fmt::Display>(message: T) {
-    GLOBAL_LOGGER.info(message);
-}
-
-pub fn warn<T: fmt::Display>(message: T) {
-    GLOBAL_LOGGER.warn(message);
-}
-
-pub fn error<T: fmt::Display>(message: T) {
-    GLOBAL_LOGGER.error(message);
 }
 
 pub fn set_global_level(level: LogLevel) {

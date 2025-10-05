@@ -5,7 +5,7 @@ use bytes::Bytes;
 
 use super::common::Funcs;
 use super::errors::Result;
-use crate::{error_fmt, warn_fmt};
+use crate::{trace_fmt, debug_fmt, error_fmt, warn_fmt};
 
 /// 临时文件夹管理器
 #[derive(Debug, Clone)]
@@ -31,14 +31,10 @@ impl TempDir {
 }
 
 impl TempDir {
-    pub fn new() -> Self {
-        Self {
-            path: PathBuf::new(),
-        }
-    }
-
-    pub fn init(&mut self, content: &str) {
+    pub fn parse(content: &str) -> Self {
+        trace_fmt!("开始解析临时文件夹");
         let temp_dir = generate_temp_dir(&content);
+        debug_fmt!("临时文件夹路径: {}", temp_dir.display());
         if !temp_dir.exists() {
             match fs::create_dir_all(&temp_dir) {
                 Ok(_) => {}
@@ -47,7 +43,9 @@ impl TempDir {
                 }
             }
         }
-        self.path = temp_dir;
+        Self {
+            path: temp_dir,
+        }
     }
 
     /// 写入文件
@@ -87,6 +85,7 @@ impl TempDir {
 
     /// 完整下载后清理临时文件夹
     pub fn cleanup(&mut self) -> Result<()> {
+        trace_fmt!("清理临时文件夹");
         if self.path.exists() {
             match fs::remove_dir_all(&self.path) {
                 Ok(_) => {}

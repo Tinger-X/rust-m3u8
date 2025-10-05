@@ -35,10 +35,6 @@ pub enum M3u8Error {
     #[error("Regex error: {0}")]
     Regex(#[from] RegexError),
 
-    /// 正则表达式错误
-    #[error("URL parse error: {0}")]
-    UrlParseError(#[from] url::ParseError),
-
     /// M3U8解析错误
     #[error("M3U8 parse error: {0}")]
     M3U8Parse(String),
@@ -50,6 +46,10 @@ pub enum M3u8Error {
     /// 配置解析错误
     #[error("Failed to parse config file: {0}")]
     ParseError(#[from] toml::de::Error),
+
+    /// 未实现错误
+    #[error("Not implemented: {0}")]
+    _ToBeImplemented(String),
 }
 
 /// 结果类型别名

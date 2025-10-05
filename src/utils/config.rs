@@ -1,6 +1,7 @@
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
+use super::args::Cli;
 use super::errors::Result;
 use super::logger::LogLevel;
 use crate::warn_fmt;
@@ -13,6 +14,7 @@ pub struct SystemConfig {
     pub retry: u32,
     pub proxies: Vec<(String, u32)>,
     pub log_level: LogLevel,
+    pub base_url: Option<String>,
 }
 
 impl Default for SystemConfig {
@@ -22,6 +24,7 @@ impl Default for SystemConfig {
             retry: 3,
             proxies: Vec::new(),
             log_level: LogLevel::Info,
+            base_url: None,
         }
     }
 }
@@ -31,14 +34,14 @@ impl Default for SystemConfig {
 #[serde(default)]
 pub struct AdFilterConfig {
     pub url_patterns: Vec<String>,
-    pub main_size_index: i32,
+    pub resolution: bool,
 }
 
 impl Default for AdFilterConfig {
     fn default() -> Self {
         Self {
             url_patterns: Vec::new(),
-            main_size_index: -1,
+            resolution: false,
         }
     }
 }
@@ -77,27 +80,25 @@ impl Default for AppConfig {
 }
 
 impl AppConfig {
-    pub fn parse(src: &Option<String>) -> Self {
-        match Self::inner_parse(src) {
-            Ok(config) => config,
-            Err(e) => {
-                warn_fmt!("解析配置文件失败: {}", e);
-                AppConfig::default()
-            }
-        }
-    }
-
     fn inner_parse(src: &Option<String>) -> Result<Self> {
         let config = match src {
             Some(path) => {
                 let content = std::fs::read_to_string(path)?;
                 let mut config: AppConfig = toml::from_str(&content)?;
+                
                 if config.system.workers == 0 {
                     warn_fmt!("使用默认 workers: 10");
                     config.system.workers = 10;
                 }
                 if config.system.retry == 0 {
                     config.system.retry = u32::MAX;
+                }
+                if config.system.base_url.is_some() {
+                    let base_url = config.system.base_url.as_mut().unwrap();
+                    if !base_url.starts_with("http://") && !base_url.starts_with("https://") {
+                        base_url.insert_str(0, "https://");
+                    }
+                    config.system.base_url = Some(base_url.trim_end_matches('/').to_string());
                 }
 
                 let default = AppConfig::default();
@@ -116,5 +117,30 @@ impl AppConfig {
             None => AppConfig::default(),
         };
         Ok(config)
+    }
+}
+
+impl AppConfig {
+    pub fn parse(src: &Option<String>) -> Self {
+        match Self::inner_parse(src) {
+            Ok(config) => config,
+            Err(e) => {
+                warn_fmt!("解析配置文件失败: {}", e);
+                AppConfig::default()
+            }
+        }
+    }
+
+    pub fn accept_cli(&mut self, cli: &Cli) {
+        if let Some(ref base_url) = cli.base_url {
+            self.system.base_url = Some(base_url.clone());
+        }
+        for header in &cli.headers {
+            if let Some((key, value)) = header.split_once(':') {
+                self.headers.insert(key.trim().to_string(), value.trim().to_string());
+            } else {
+                warn_fmt!("已忽略无法解析的请求头：{}", header);
+            }
+        }
     }
 }

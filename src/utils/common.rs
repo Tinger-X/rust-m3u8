@@ -1,34 +1,33 @@
-use bytes::Bytes;
 use chrono::Utc;
 use md5::{Digest, Md5};
 
-use crate::warn_fmt;
+use crate::{trace_fmt, debug_fmt};
+use super::errors::Result;
 
 pub struct Funcs;
 
 impl Funcs {
-    /// 确保文件名有正确的扩展名，扩展名只能取：mp4, avi, mkv, flv, ts
-    pub fn ensure_extension(filename: &str, extension: &str) -> String {
-        match extension {
-            "mp4" | "avi" | "mkv" | "flv" | "ts" => {
-                if filename.ends_with(format!(".{}", extension).as_str()) {
-                    filename.to_string()
-                } else {
-                    format!("{}.{}", filename, extension)
-                }
-            }
-            _ => {
-                warn_fmt!(
-                    "不支持的扩展名 '{}', 仅支持 mp4(默认，当前仅支持), avi, mkv, flv, ts",
-                    extension
-                );
-                format!("{}.{}", filename, "mp4")
-            }
+    /// 确保输出文件夹存在，同时将输出文件后缀置为.ts
+    pub fn ensure_filepath(filename: &str) -> Result<String> {
+        trace_fmt!("检查输出文件");
+        let filepath = if !filename.ends_with(".ts") {
+            format!("{}.ts", filename)
+        } else {
+            filename.to_string()
+        };
+        debug_fmt!("输出文件: {}", filepath);
+
+        let parent = std::path::Path::new(&filepath).parent().unwrap();
+        if !parent.exists() {
+            debug_fmt!("创建输出目录: {}", parent.display());
+            std::fs::create_dir_all(parent)?;
         }
+
+        Ok(filepath)
     }
 
-    /// 生成默认文件名
-    pub fn generate_default_filename() -> String {
+    /// 生成文件名
+    pub fn generate_filename() -> String {
         Utc::now().format("%Y-%m-%d_%H-%M-%S").to_string()
     }
 
@@ -41,10 +40,5 @@ impl Funcs {
         let mut hasher = Md5::new();
         hasher.update(s.as_bytes());
         format!("{:x}", hasher.finalize())
-    }
-
-    pub fn decode_video_size(data: &Bytes) -> Option<(u32, u32)> {
-        // 将Bytes转换为Cursor以便进行读取操作
-        None
     }
 }
