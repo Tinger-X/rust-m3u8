@@ -1,5 +1,6 @@
 use bytes::Bytes;
 use indicatif::{ProgressBar, ProgressStyle};
+use reqwest::Url;
 use reqwest::{Proxy, blocking::Client};
 use std::fs::OpenOptions;
 use std::io::Write;
@@ -66,7 +67,9 @@ fn get_client(proxies: &Proxies) -> Result<Client> {
 }
 
 impl M3U8 {
-    fn parse_segments(&mut self, m3u8_content: &str) -> Result<()> {
+    fn parse_segments(&mut self, src: &str, m3u8_content: &str) -> Result<()> {
+        let src_url = Url::parse(&src)?;
+        let src_base = src_url.as_str().trim_end_matches('/');
         for (index, &line) in m3u8_content
             .lines()
             .collect::<Vec<&str>>()
@@ -85,7 +88,7 @@ impl M3U8 {
                         segment.url = format!("{}/{}", base_url, trimmed.trim_start_matches('/'));
                     }
                     None => {
-                        error_fmt!("TS片段 {} 不是绝对URL，且未配置 base_url", trimmed);
+                        segment.url = format!("{}/{}", src_base, trimmed.trim_start_matches('/'));
                     }
                 }
             }
@@ -160,7 +163,7 @@ impl M3U8 {
             proxies: proxies,
         };
 
-        m3u8.parse_segments(&m3u8_content)?;
+        m3u8.parse_segments(&src, &m3u8_content)?;
         Ok(m3u8)
     }
 

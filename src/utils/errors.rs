@@ -1,8 +1,8 @@
-use thiserror::Error;
-use std::io::Error as IoError;
-use reqwest::Error as ReqwestError;
-use regex::Error as RegexError;
 use indicatif::style::TemplateError;
+use regex::Error as RegexError;
+use reqwest::Error as ReqwestError;
+use std::io::Error as IoError;
+use thiserror::Error;
 
 /// 应用程序错误类型
 #[derive(Error, Debug)]
@@ -46,6 +46,10 @@ pub enum M3u8Error {
     /// 配置解析错误
     #[error("Failed to parse config file: {0}")]
     ParseError(#[from] toml::de::Error),
+
+    /// URL解析错误
+    #[error("URL parse error: {0}")]
+    UrlParse(#[from] url::ParseError),
 
     /// 未实现错误
     #[error("Not implemented: {0}")]
