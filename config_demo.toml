@@ -14,7 +14,7 @@ retry = 3
 #    公共代理：https://proxy.scdn.io/
 proxies = []
 # 1.4 日志等级：trace, debug, info(默认), warn, error
-log_level = "trace"
+log_level = "info"
 # 1.5 ts地址的基础url，当ts连接不是绝对url时需要启用，程序默认不指定
 # base_url = ""
 
