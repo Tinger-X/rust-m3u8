@@ -28,6 +28,7 @@ impl Funcs {
 
     /// 生成文件名
     pub fn generate_filename() -> String {
+        trace_fmt!("生成默认时间戳文件名");
         Utc::now().format("%Y-%m-%d_%H-%M-%S").to_string()
     }
 
