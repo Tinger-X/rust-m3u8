@@ -50,7 +50,7 @@ rust-m3u8 -H "User-Agent: MyApp/1.0" -H "Accept-Language: en-US,en;q=0.9" https:
 
 ## 配置文件
 
-配置文件采用toml格式，具体说明如下：
+配置文件采用toml格式，示例：[config_demo.toml](config_demo.toml)，具体说明如下：
 
 ```toml
 # Rust M3U8 下载器配置文件示例

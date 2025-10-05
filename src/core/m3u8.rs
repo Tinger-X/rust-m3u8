@@ -54,7 +54,7 @@ fn get_client(proxies: &Proxies) -> Result<Client> {
         .connect_timeout(Duration::from_secs(10)); // 设置连接超时时间
 
     let client = match proxies.select() {
-        Some(proxy_url) => match Proxy::all(proxy_url) {
+        Some(proxy_url) => match Proxy::http(proxy_url) {
             Ok(proxy) => client_builder.proxy(proxy).build()?,
             Err(e) => {
                 warn_fmt!("代理配置错误 {}: {}", proxy_url, e);

@@ -20,7 +20,7 @@ pub struct SystemConfig {
 impl Default for SystemConfig {
     fn default() -> Self {
         Self {
-            workers: 10,
+            workers: 20,
             retry: 3,
             proxies: Vec::new(),
             log_level: LogLevel::Info,

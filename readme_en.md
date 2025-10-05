@@ -50,7 +50,7 @@ rust-m3u8 -H "User-Agent: MyApp/1.0" -H "Accept-Language: en-US,en;q=0.9" https:
 
 ## Configuration File
 
-The configuration file is in toml format, with the following specific descriptions:
+The configuration file is in toml format, example: [config_demo.toml](config_demo.toml), with the following specific descriptions:
 
 ```toml
 # Rust M3U8 Downloader Configuration File Example
@@ -58,7 +58,7 @@ The configuration file is in toml format, with the following specific descriptio
 # 1. General System Configuration
 [system]
 # 1.1 Concurrent Download Workers
-workers = 10
+workers = 24
 # 1.2 Failed Retry Times (0 means infinite retries)
 retry = 3
 # 1.3 Proxy Pool Configuration
