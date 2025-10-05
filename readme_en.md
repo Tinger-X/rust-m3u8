@@ -7,7 +7,7 @@ Terminal M3U8 video downloader written in Rust
 ## Features
 
 - **Cross-platform**: Supports Windows(only tested on Windows 11), macOS (untested), and Linux (only tested on Ubuntu 22.04)
-- **Multithreading**: Supports multithreaded downloading with a default of 10 threads, configurable via a configuration file
+- **Multithreading**: Supports multithreaded downloading with a default of 20 threads, configurable via a configuration file
 - **Resume interrupted downloads**: Allows resuming downloads after interruption
 - **Error retry**: Supports retrying failed downloads with a default of 3 retries, configurable via a configuration file
 - **Ad filtering**: Supports URL-based ad filtering and resolution-based ad filtering (only keep the resolution that appears most frequently in the complete video, **to be implemented**)
