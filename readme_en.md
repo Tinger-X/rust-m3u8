@@ -106,3 +106,21 @@ resolution = false
 + decode `ts` Bytes into frame size, supoort resolution ads filter
 + support other output video format
 + optimize cross platform build
+
+## Notes
+
+Currently, it has only been compiled and tested on Windows 11 and Ubuntu 22.04. Other platforms are yet to be provided by developers who have the conditions. Thank you.
+
+### Build Guidance
+
+```bash
+# pull project into the target machine, eg.:
+git clone git@github.com:Tinger-X/rust-m3u8.git
+# normal test
+cargo run -- https://vip.ffzy-play7.com/20230102/10794_9794026c/2000k/hls/mixed.m3u8
+# with config file（refer: `readme.md` and `config_demo.toml`）
+cargo run -- https://vip.ffzy-play7.com/20230102/10794_9794026c/2000k/hls/mixed.m3u8 -c config_demo.toml
+# run build
+cargo build --release
+# share your executable: you are welcome to submit issues or pull requests
+```
