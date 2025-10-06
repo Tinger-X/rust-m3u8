@@ -96,3 +96,21 @@ resolution = false
 + 解析ts片段尺寸，实现根据分辨率过滤广告
 + 支持其它格式视频格式的输出
 + 跨平台编译优化
+
+## 说明
+
+当前仅在Windows 11、Ubuntu 22.04上编译并测试通过，其余平台还有待各位有条件的开发者提供，谢谢。
+
+### 编译指引
+
+```bash
+# 将代码拉取到待测机中，如：
+git clone git@github.com:Tinger-X/rust-m3u8.git
+# 常规测试
+cargo run -- https://vip.ffzy-play7.com/20230102/10794_9794026c/2000k/hls/mixed.m3u8
+# 使用配置文件（参考`readme.md`和`config_demo.toml`）
+cargo run -- https://vip.ffzy-play7.com/20230102/10794_9794026c/2000k/hls/mixed.m3u8 -c config_demo.toml
+# 执行编译
+cargo build --release
+# 分享可执行文件：欢迎各位提交issue或者pull requests
+```
