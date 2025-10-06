@@ -48,8 +48,12 @@ pub enum M3u8Error {
     ParseError(#[from] toml::de::Error),
 
     /// URL解析错误
+    #[error("URL join error: {0}")]
+    UrlJoin(#[from] url::ParseError),
+
+    /// URL解析错误
     #[error("URL parse error: {0}")]
-    UrlParse(#[from] url::ParseError),
+    UrlParse(String),
 
     /// 未实现错误
     #[error("Not implemented: {0}")]

@@ -66,12 +66,22 @@ fn get_client(proxy: &Proxies) -> Result<Client> {
     Ok(client)
 }
 
+fn parse_url(url: &str, err: &str) -> std::result::Result<Url, String> {
+    match Url::parse(url) {
+        Ok(url) => Ok(url),
+        Err(_) => {
+            Err(format!("{}：{}", err, url).to_string())
+        }
+    }
+}
+
 impl M3U8 {
     fn parse_segments(&mut self, src: &str, m3u8_content: &str) -> Result<()> {
         let base_url = match self.config.system.base_url.as_deref() {
-            Some(base_url) => Url::parse(base_url)?,
-            None => Url::parse(src)?,
+            Some(base_url) => parse_url(base_url, "无效的base_url"),
+            None => parse_url(src, "使用本地M3U8且ts片段为相对路径时应配置base_url"),
         };
+        trace_fmt!("M3U8基础URL: {:?}", &base_url);
         for (index, &line) in m3u8_content
             .lines()
             .collect::<Vec<&str>>()
@@ -85,7 +95,10 @@ impl M3U8 {
             let mut segment = Segment::new(trimmed.to_string());
             let is_seg_online = Funcs::is_online_resource(trimmed);
             if !is_seg_online {
-                segment.url = base_url.join(trimmed)?.to_string();
+                match base_url.clone() {
+                    Ok(url) => segment.url = url.join(trimmed)?.to_string(),
+                    Err(e) => return Err(M3u8Error::UrlParse(e)),
+                }
             }
             segment.is_ad = self.filter.is_ad_by_url(&segment.url);
             if segment.is_ad {

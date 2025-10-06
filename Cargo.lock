@@ -1200,7 +1200,7 @@ dependencies = [
 
 [[package]]
 name = "rust-m3u8"
-version = "1.0.1"
+version = "1.0.2"
 dependencies = [
  "bytes",
  "chrono",
