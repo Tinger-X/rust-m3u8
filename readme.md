@@ -1,116 +1,213 @@
-[English Readme](readme_en.md)
+# Rust M3U8 下载器
 
-# rust-m3u8
+一个用 Rust 编写的高性能 M3U8 视频下载器，支持嵌套播放列表解析和多种高级功能。
 
-终端M3U8视频下载器，使用rust编写
+## 🚀 功能特性
 
-## 特性
+### 核心功能
+- ✅ **标准 M3U8 播放列表解析** - 完整支持 M3U8 格式规范
+- ✅ **嵌套播放列表支持** - 自动识别主播放列表和多个变体流
+- ✅ **多线程并发下载** - 高性能并行下载视频片段
+- ✅ **智能广告过滤** - 基于正则表达式的广告片段检测和过滤
+- ✅ **代理负载均衡** - 多代理服务器权重轮询
+- ✅ **自定义请求头** - 支持认证和自定义 HTTP 头
+- ✅ **断点续传** - 自动重试失败的下载任务
 
-- **跨平台**：支持Windows(仅测试windows 11)、macOS(未测试)、Linux(仅测试ubuntu 22.04)
-- **多线程**：支持多线程下载，默认线程数为20，通过配置文件指定
-- **断点续传**：支持断点续传，下载中断后可以继续下载
-- **错误重试**：支持下载失败重试，默认重试3次，通过配置文件指定
-- **广告过滤**：支持URL过滤广告、分辨率过滤广告（仅保留完整视频中出现频次最高的分辨率，**待实现**）
-- **权重代理池**：支持配置权重代理池，根据权重随机选择代理
-- **本地m3u8**：支持预先下载m3u8文件到本地，直接从本地读取视频片段列表
+### 高级特性
+- 🎯 **智能质量选择** - 自动选择最佳质量的变体流
+- 🔧 **多种合并模式** - 简单合并和 FFmpeg 高质量合并
+- 📊 **实时进度显示** - 详细的下载进度和状态信息
+- 🛡️ **错误恢复** - 强大的错误处理和重试机制
+- 📁 **本地文件支持** - 支持本地 M3U8 文件处理
 
-## 参数说明
+## 📦 安装
 
+### 从源码安装
 ```bash
-M3U8视频下载器
-
-Usage: rust-m3u8 [OPTIONS] <SRC>
-
-Arguments:
-  <SRC>  M3U8源文件地址，支持http(s)以及本地文件
-
-Options:
-  -d, --dest <DEST>          下载完成后输出的视频文件名（不含扩展，默认当前时间）
-  -c, --config <CONFIG>      配置文件路径，不指定则使用默认配置
-  -b, --base-url <BASE_URL>  基础url，用于拼接ts片段uri
-  -H, --header <HEADERS>     添加或覆盖HTTP请求头信息，格式: Key:Value
-  -h, --help                 Print help
-  -V, --version              Print version
+git clone https://github.com/Tinger-X/rust-m3u8.git
+cd rust-m3u8
+cargo install --path .
 ```
 
-示例：（优先级：命令行参数 > 配置文件 > 程序默认值）
+### 直接运行
 ```bash
-# 基本用法
-rust-m3u8 https://example.com/video.m3u8
-
-# 指定输出文件名
-rust-m3u8 -d my_video https://example.com/video.m3u8
-
-# 指定配置文件
-rust-m3u8 -c my_config.toml https://example.com/video.m3u8
-
-# 添加自定义HTTP请求头
-rust-m3u8 -H "User-Agent: MyApp/1.0" -H "Accept-Language: en-US,en;q=0.9" https://example.com/video.m3u8
+cargo run -- [参数]
 ```
 
-## 配置文件
+## 🎯 快速开始
 
-配置文件采用toml格式，示例：[config_demo.toml](config_demo.toml)，具体说明如下：
+### 基本下载
+```bash
+# 下载标准 M3U8 视频
+rust-m3u8 https://example.com/playlist.m3u8
 
-```toml
-# Rust M3U8 下载器配置文件示例
-
-# 1. 通用系统配置
-[system]
-# 1.1 并发下载数量，程序默认20
-workers = 24
-# 1.2 失败重试次数（0表示无限重试，程序默认3）
-retry = 3
-# 1.3 代理池，配置方式为：`[地址, 权重]` 下载时按照权重分配，程序默认不开启（使用系统网络环境），示例：
-#    proxies = [
-#        ["http://127.0.0.1:7890", 100],
-#        ["http://127.0.0.1:7891", 50],
-#    ]
-proxies = []
-# 1.4 日志等级：trace, debug, info(默认), warn, error
-log_level = "trace"
-# 1.5 ts地址的基础url，当ts连接不是绝对url时需要启用，程序默认不指定
-# base_url = ""
-
-# 2. HTTP请求头配置，程序默认值如下
-[headers]
-User-Agent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
-Accept = "*/*"
-Accept-Encoding = "gzip, deflate, br"
-Connection = "keep-alive"
-
-# 3. 广告过滤配置
-[filters]
-# 3.1 URL匹配正则表达式列表，示例（默认为空）:
-#    url_patterns = [
-#        "ad\\.example\\.com",
-#        ".*_ad\\.ts"
-#    ]
-url_patterns = []
-# 3.2 分辨率匹配，取true时仅保留分辨率出现频次最高的视频片段，移除其它分辨率片段，默认不开启
-resolution = false
+# 下载嵌套播放列表
+rust-m3u8 https://example.com/master.m3u8 -o high_quality_video
 ```
 
-## 后续计划
+### 高级下载
+```bash
+# 使用代理和广告过滤
+rust-m3u8 https://example.com/playlist.m3u8 \
+  -p "10,http://proxy1:8080" \
+  -p "15,http://proxy2:8080" \
+  -f "ad\\." \
+  -f "tracking\\." \
+  --use-ffmpeg
+```
 
-+ 解析ts片段尺寸，实现根据分辨率过滤广告
-+ 支持其它格式视频格式的输出
-+ 跨平台编译优化
+## 📚 使用示例
 
-## 说明
-
-当前仅在Windows 11、Ubuntu 22.04上编译并测试通过，其余平台还有待各位有条件的开发者提供，谢谢。
-
-### 编译指引
+### 示例程序
+项目提供了多个示例程序，展示不同功能的使用方式：
 
 ```bash
-# 将代码拉取到待测机中，如：
-git clone git@github.com:Tinger-X/rust-m3u8.git
-# 常规测试
-cargo run -- https://vip.ffzy-play7.com/20230102/10794_9794026c/2000k/hls/mixed.m3u8
-# 使用配置文件（参考`readme.md`和`config_demo.toml`）
-cargo run -- https://vip.ffzy-play7.com/20230102/10794_9794026c/2000k/hls/mixed.m3u8 -c config_demo.toml
-# 执行编译
+# 运行基础使用示例
+cargo run --example basic_usage
+
+# 运行高级功能示例
+cargo run --example advanced_features
+
+# 运行本地文件示例
+cargo run --example local_file_usage
+
+# 运行嵌套播放列表示例
+cargo run --example nested_m3u8
+```
+
+### 程序库使用
+```rust
+use rust_m3u8::*;
+use std::path::PathBuf;
+
+#[tokio::main]
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let downloader = M3u8Downloader::new(
+        "https://example.com/playlist.m3u8".to_string(),
+        PathBuf::from("output.mp4"),
+        PathBuf::from("temp"),
+        10,
+        false,
+        None,
+        3,
+        None,
+        vec![],
+        vec![],
+        false,
+    );
+
+    downloader.download().await?;
+    Ok(())
+}
+```
+
+## 🏗️ 项目架构
+
+### 模块结构
+```
+src/
+├── lib.rs              # 库入口和公共接口
+├── types.rs            # 核心数据类型定义
+├── downloader.rs       # 下载器主逻辑实现
+├── merger.rs           # 视频合并功能
+├── proxy.rs           # 代理配置和管理
+├── error.rs           # 错误类型定义
+└── parser/            # 解析器模块
+    ├── mod.rs         # 模块导出
+    ├── content_parser.rs # 内容解析器
+    ├── master_parser.rs # 主播放列表解析器
+    ├── media_parser.rs  # 媒体播放列表解析器
+    └── nested_parser.rs # 嵌套播放列表解析器
+```
+
+### 核心组件
+1. **M3u8Downloader** - 主要的下载器接口
+2. **NestedParser** - 嵌套播放列表解析器
+3. **ProxyConfig** - 代理配置管理
+4. **VideoMerger** - 视频合并器
+5. **M3u8Playlist** - 播放列表数据结构
+
+## 🧪 测试
+
+项目包含完整的测试套件：
+
+```bash
+# 运行所有测试
+cargo test
+
+# 运行特定测试
+cargo test test_m3u8_parser
+cargo test test_downloader
+cargo test test_integration
+
+# 运行测试并显示输出
+cargo test -- --nocapture
+```
+
+### 测试覆盖
+- ✅ 单元测试 - 各个模块的独立测试
+- ✅ 集成测试 - 端到端的功能测试
+- ✅ 解析器测试 - M3U8 格式解析测试
+- ✅ 下载器测试 - 下载流程测试
+
+## 🔧 开发指南
+
+### 代码规范
+- 遵循 Rust 官方编码规范
+- 使用 clippy 进行代码检查
+- 完整的文档注释
+
+### 构建和运行
+```bash
+# 开发构建
+cargo build
+
+# 发布构建
 cargo build --release
-# 分享可执行文件：欢迎各位提交issue或者pull requests
+
+# 代码检查
+cargo clippy
+
+# 格式检查
+cargo fmt --check
 ```
+
+## 📖 文档
+
+### 在线文档
+```bash
+# 生成本地文档
+cargo doc --open
+```
+
+### 使用指南
+详细的使用说明请参考 [examples/usage.md](examples/usage.md) 文件。
+
+## 🤝 贡献指南
+
+欢迎贡献代码！请遵循以下步骤：
+
+1. Fork 项目
+2. 创建功能分支 (`git checkout -b feature/AmazingFeature`)
+3. 提交更改 (`git commit -m 'Add some AmazingFeature'`)
+4. 推送到分支 (`git push origin feature/AmazingFeature`)
+5. 打开 Pull Request
+
+## 📄 许可证
+
+本项目采用 MIT 许可证 - 查看 [LICENSE](LICENSE) 文件了解详情。
+
+## 🐛 问题反馈
+
+如果您遇到任何问题，请通过以下方式反馈：
+
+- [创建 Issue](https://github.com/your-repo/rust-m3u8/issues)
+- 发送邮件到项目维护者
+
+## 🙏 致谢
+
+感谢所有为这个项目做出贡献的开发者！
+
+---
+
+**Rust M3U8 下载器** - 让 M3U8 视频下载变得简单高效！ 🎥

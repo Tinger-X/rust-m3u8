@@ -1,56 +1,102 @@
-mod core;
-mod utils;
 use clap::Parser;
+use rust_m3u8::{M3u8Downloader, M3u8Error, ProxyConfig};
+use std::path::PathBuf;
 
-use core::m3u8::M3U8;
-use utils::args::Cli;
-use utils::common::Funcs;
-use utils::config::AppConfig;
-use utils::errors::Result;
-use utils::logger::*;
+#[derive(Parser)]
+#[command(name = "rust-m3u8")]
+#[command(about = "一个用 Rust 编写的 M3U8 下载器")]
+struct Args {
+    /// M3U8 播放列表的 URL 或本地文件路径
+    url: String,
 
-fn main() {
-    let cli = Cli::parse();
-    let mut config = AppConfig::parse(&cli.config);
-    set_global_level(config.system.log_level);
-    config.accept_cli(&cli);
-    trace_fmt!("配置文件: {:?}", config);
-    trace_fmt!("命令行参数: {:?}", cli);
+    /// 输出文件名
+    #[arg(short, long, default_value = "output")]
+    output: String,
 
-    // 执行主流程
-    if let Err(e) = run(&cli, &config) {
-        error_fmt!("执行失败: {:?}", e);
-    }
+    /// 并发下载数量
+    #[arg(short, long, default_value = "20")]
+    concurrent: usize,
+
+    /// 临时文件目录
+    #[arg(short, long, default_value = "temp")]
+    temp_dir: String,
+
+    /// 最大重试次数
+    #[arg(short, long, default_value = "3")]
+    retry: usize,
+
+    /// 代理配置，格式: "weight,proxy_url"，可多次指定
+    #[arg(short, long, action = clap::ArgAction::Append)]
+    proxy: Vec<String>,
+
+    /// 基础 URL（当使用本地 M3U8 文件且包含相对路径时必需）
+    #[arg(short, long)]
+    base: Option<String>,
+
+    /// 自定义请求头，格式: "Name: Value"，可多次指定
+    #[arg(short = 'H', long, action = clap::ArgAction::Append)]
+    header: Vec<String>,
+
+    /// 广告过滤正则表达式，可多次指定
+    #[arg(short, long, action = clap::ArgAction::Append)]
+    filter: Vec<String>,
+
+    /// 下载完成后是否保留临时文件
+    #[arg(long)]
+    keep_temp: bool,
+
+    /// 使用系统 FFmpeg 合并视频片段
+    #[arg(long)]
+    use_ffmpeg: bool,
 }
 
-fn run(cli: &Cli, config: &AppConfig) -> Result<()> {
-    let mut m3u8 = M3U8::parse(&cli.src, &config)?;
-    info_fmt!(
-        "解析完成，找到 {} 个片段，其中 {} 个广告，{} 个需要下载",
-        m3u8.segments.len(),
-        m3u8.ads,
-        m3u8.need_downloads
+#[tokio::main]
+async fn main() -> Result<(), M3u8Error> {
+    let args = Args::parse();
+
+    // 解析代理配置
+    let mut proxy_count: u32 = 0;
+    let proxy_config = if !args.proxy.is_empty() {
+        match ProxyConfig::from_args(&args.proxy) {
+            Ok(config) => {
+                proxy_count = config.len() as u32;
+                Some(config)
+            }
+            Err(e) => {
+                eprintln!("❌ 代理配置错误: {}", e);
+                return Err(M3u8Error::ParseError(e));
+            }
+        }
+    } else {
+        None
+    };
+
+    println!(
+        "已配置: 🌐 代理 {} 个, 🚫 广告过滤规则 {} 条",
+        proxy_count,
+        args.filter.len()
+    );
+    println!(
+        "📁 输出文件: {}.mp4, 🔄 并发数量: {}, 🔁 最大重试: {} 次",
+        args.output, args.concurrent, args.retry
     );
 
-    // 下载片段
-    info_fmt!("开始下载片段，使用 {} 线程，代理: {}", config.system.workers, m3u8.proxy.proxies.len());
-    m3u8.download();
-    info_fmt!("下载完成，成功: {}, 失败: {}", m3u8.downloaded, m3u8.errors);
-    m3u8.filter_ads_by_size();
+    let downloader = M3u8Downloader::new(
+        args.url,
+        PathBuf::from(args.output).with_extension("mp4"),
+        PathBuf::from(args.temp_dir),
+        args.concurrent,
+        args.keep_temp,
+        proxy_config,
+        args.retry,
+        args.base,
+        args.header,
+        args.filter,
+        args.use_ffmpeg,
+    );
 
-    // 生成输出文件名
-    let filename = match &cli.dest {
-        Some(name) => name.to_string(),
-        None => Funcs::generate_filename(),
-    };
-    let filepath = Funcs::ensure_filepath(&filename)?;
+    downloader.download().await?;
 
-    // 合并视频
-    info_fmt!("正在合并视频到: {}", filepath);
-    m3u8.merge_to_file(&filepath)?;
-    info_fmt!("视频已合并到: {}", filepath);
-    m3u8.cleanup()?;
-
-    info_fmt!("任务完成");
+    println!("✅ 下载完成！");
     Ok(())
 }
