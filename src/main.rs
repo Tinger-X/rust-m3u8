@@ -4,7 +4,7 @@ use std::path::PathBuf;
 
 #[derive(Parser)]
 #[command(name = "rust-m3u8")]
-#[command(about = "一个用 Rust 编写的 M3U8 下载器")]
+#[command(about = "一个用 Rust 编写的 M3U8 下载器", version)]
 struct Args {
     /// M3U8 播放列表的 URL 或本地文件路径
     url: String,
