@@ -1,0 +1,13 @@
+#EXTM3U
+#EXT-X-VERSION:3
+#EXT-X-TARGETDURATION:10
+#EXT-X-PLAYLIST-TYPE:VOD
+#EXTINF:10.0,
+segment1.ts
+#EXTINF:10.0,
+segment2.ts
+#EXTINF:10.0,
+https://ads.example.com/ad1.ts
+#EXTINF:10.0,
+segment3.ts
+#EXT-X-ENDLIST
