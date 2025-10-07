@@ -55,7 +55,7 @@ impl VideoMerger {
         let mut file_list_content = String::new();
 
         // 检查所有片段文件是否存在，并创建文件列表
-        for index in 0..segments.len(){
+        for index in 0..segments.len() {
             let segment_path = temp_dir.join(format!("segment_{:06}.ts", index));
 
             if !segment_path.exists() {

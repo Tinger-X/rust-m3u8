@@ -28,8 +28,9 @@ mod tests {
 
     #[test]
     fn test_downloader_with_proxy() {
-        let proxy_config = ProxyConfig::from_args(&vec!["10,http://proxy1:8080".to_string()]).unwrap();
-        
+        let proxy_config =
+            ProxyConfig::from_args(&vec!["10,http://proxy1:8080".to_string()]).unwrap();
+
         let _ = M3u8Downloader::new(
             "https://example.com/playlist.m3u8".to_string(),
             PathBuf::from("output.mp4"),
@@ -59,7 +60,10 @@ mod tests {
             None,
             3,
             None,
-            vec!["Authorization: Bearer token".to_string(), "User-Agent: CustomAgent".to_string()],
+            vec![
+                "Authorization: Bearer token".to_string(),
+                "User-Agent: CustomAgent".to_string(),
+            ],
             vec![],
             false,
         );
@@ -146,7 +150,7 @@ mod tests {
 
         // 验证临时目录可以被创建
         assert!(fs::create_dir_all(&temp_path).await.is_ok());
-        
+
         // 清理测试目录
         let _ = fs::remove_dir_all(&temp_path).await;
     }
@@ -175,8 +179,6 @@ mod tests {
             assert!(config.get_random_proxy().is_some());
         }
     }
-
-
 
     #[test]
     fn test_video_merger_creation() {

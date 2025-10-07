@@ -1,6 +1,6 @@
 use crate::error::M3u8Error;
-use crate::parser::nested_parser::NestedParser;
 use crate::merger::VideoMerger;
+use crate::parser::nested_parser::NestedParser;
 use crate::proxy::ProxyConfig;
 use crate::types::M3u8Segment;
 use crate::types::NestedM3u8;
@@ -109,7 +109,9 @@ impl M3u8Downloader {
                 .parse_from_url(&self.url, self.proxy_config.as_ref(), &self.headers)
                 .await?
         } else {
-            parser.parse_from_file(&self.url, self.base_url.as_deref()).await?
+            parser
+                .parse_from_file(&self.url, self.base_url.as_deref())
+                .await?
         };
 
         // 显示播放列表信息
