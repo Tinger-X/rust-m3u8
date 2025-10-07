@@ -1,5 +1,5 @@
 //! 本地文件 M3U8 下载示例
-//! 
+//!
 //! 这个示例展示了如何使用 rust-m3u8 库处理本地 M3U8 文件。
 
 use rust_m3u8::*;
@@ -11,17 +11,17 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // 创建下载器实例（使用本地文件）
     let _ = M3u8Downloader::new(
-        "local_playlist.m3u8".to_string(),              // 本地 M3U8 文件路径
+        "local_playlist.m3u8".to_string(),             // 本地 M3U8 文件路径
         PathBuf::from("local_output.mp4"),             // 输出文件路径
         PathBuf::from("temp_local"),                   // 临时目录
-        5,                                              // 并发下载数量
-        false,                                          // 不保留临时文件
-        None,                                           // 不使用代理
-        3,                                              // 最大重试次数
+        5,                                             // 并发下载数量
+        false,                                         // 不保留临时文件
+        None,                                          // 不使用代理
+        3,                                             // 最大重试次数
         Some("https://example.com/base/".to_string()), // 基础 URL（用于相对路径）
-        vec![],                                         // 无自定义请求头
-        vec![],                                         // 无广告过滤
-        false,                                          // 不使用 FFmpeg
+        vec![],                                        // 无自定义请求头
+        vec![],                                        // 无广告过滤
+        false,                                         // 不使用 FFmpeg
     );
 
     println!("📋 本地文件下载器配置完成");

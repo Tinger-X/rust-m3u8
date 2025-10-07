@@ -18,7 +18,7 @@ playlist_720p.m3u8"#;
     let nested = parser
         .parse_content(master_content, Some("https://example.com/master.m3u8"))
         .await?;
-    
+
     // 注意：实际使用时需要替换为有效的 M3U8 URL
     println!("💡 注意：此示例仅演示解析功能");
     println!("📋 要实际下载，请替换为有效的 M3U8 URL");

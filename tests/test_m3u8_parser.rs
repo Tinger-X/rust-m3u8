@@ -17,11 +17,13 @@ playlist_720p.m3u8"#;
 
         let parser = NestedParser::new(vec![]).unwrap();
         // 这里会失败，因为没有提供有效的 BASE URL
-        let result = parser.parse_content(content, Some("https://example.com/master.m3u8")).await;
+        let result = parser
+            .parse_content(content, Some("https://example.com/master.m3u8"))
+            .await;
 
         assert!(result.is_ok());
         let nested = result.unwrap();
-        
+
         assert_eq!(nested.master_playlist.variants.len(), 3);
         assert_eq!(nested.master_playlist.playlist_type, PlaylistType::Master);
         assert!(nested.master_playlist.is_nested());
@@ -42,11 +44,13 @@ segment3.ts
 #EXT-X-ENDLIST"#;
 
         let parser = NestedParser::new(vec![]).unwrap();
-        let result = parser.parse_content(content, Some("https://example.com/media.m3u8")).await;
+        let result = parser
+            .parse_content(content, Some("https://example.com/media.m3u8"))
+            .await;
 
         assert!(result.is_ok());
         let nested = result.unwrap();
-        
+
         if let Some(playlist) = nested.get_selected_variant() {
             assert_eq!(playlist.segments.len(), 3);
             assert_eq!(playlist.playlist_type, PlaylistType::Media);
@@ -71,11 +75,13 @@ https://ads.com/segment3.ts
 #EXT-X-ENDLIST"#;
 
         let parser = NestedParser::new(vec!["ad\\.com".to_string(), "ads\\.".to_string()]).unwrap();
-        let result = parser.parse_content(content, Some("https://example.com/playlist.m3u8")).await;
+        let result = parser
+            .parse_content(content, Some("https://example.com/playlist.m3u8"))
+            .await;
 
         assert!(result.is_ok());
         let nested = result.unwrap();
-        
+
         if let Some(playlist) = nested.get_selected_variant() {
             assert_eq!(playlist.segments.len(), 1); // 只有 segment2.ts 没有被过滤
             assert_eq!(playlist.ads_count, 2);
@@ -123,7 +129,7 @@ playlist_720p.m3u8"#;
     #[test]
     fn test_nested_m3u8_selection() {
         let mut nested = NestedM3u8::new();
-        
+
         // 添加一些媒体播放列表
         let mut playlist1 = M3u8Playlist::new(PlaylistType::Media);
         playlist1.segments.push(M3u8Segment {
@@ -164,9 +170,9 @@ playlist_720p.m3u8"#;
         ];
 
         let config = ProxyConfig::from_args(&proxy_args).unwrap();
-        
+
         assert_eq!(config.len(), 2);
-        
+
         // 测试随机代理选择（应该不会panic）
         for _ in 0..10 {
             assert!(config.get_random_proxy().is_some());
@@ -177,14 +183,14 @@ playlist_720p.m3u8"#;
     fn test_proxy_config_invalid_format() {
         let proxy_args = vec!["invalid_format".to_string()];
         let result = ProxyConfig::from_args(&proxy_args);
-        
+
         assert!(result.is_err());
     }
 
     #[test]
     fn test_m3u8_playlist_methods() {
         let mut playlist = M3u8Playlist::new(PlaylistType::Media);
-        
+
         playlist.segments.push(M3u8Segment {
             url: "segment1.ts".to_string(),
             duration: 10.0,
@@ -192,7 +198,7 @@ playlist_720p.m3u8"#;
             title: None,
             byte_range: None,
         });
-        
+
         playlist.segments.push(M3u8Segment {
             url: "segment2.ts".to_string(),
             duration: 15.0,
