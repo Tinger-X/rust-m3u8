@@ -101,6 +101,7 @@ impl VideoMerger {
                     // 回退到简单合并
                     return self.merge_with_rust(temp_dir, output_path, segments).await;
                 }
+                println!("✅ 成功合并 {} 个片段到 {:?}", segments.len(), output_path);
             }
             Err(e) => {
                 println!("⚠️  FFmpeg 不可用，使用简单合并: {}", e);
