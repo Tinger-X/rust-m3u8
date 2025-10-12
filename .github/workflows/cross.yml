@@ -1,0 +1,47 @@
+name: 主流平台编译
+
+on:
+  push:
+    tags:
+      - "c-*"  # temp `cross build` tags
+
+jobs:
+  build:
+    name: ${{ matrix.os }}-${{ matrix.arch }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        # 主流操作系统
+        os: [windows-latest, ubuntu-latest, macos-latest]
+        # 主流架构
+        arch: [x86_64, aarch64]
+        # 排除不可能的组合（如Windows暂不支持aarch64的GitHub Actions runner）
+        exclude:
+          - os: windows-latest
+            arch: aarch64
+
+    steps:
+      - uses: actions/checkout@v4
+      - name: "编译代码"
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          target: ${{ matrix.target.triple }}
+      - run: cargo build --release
+      
+      - name: 准备产物
+        run: |
+          # 添加平台后缀
+          if ("${{ matrix.os }}" -eq "windows-latest") {
+            Copy-Item "target/release/rust-m3u8.exe" "target/release/rust-m3u8-${{ matrix.os }}-${{ matrix.arch }}.exe"
+          } else {
+            Copy-Item "target/release/rust-m3u8" "target/release/rust-m3u8-${{ matrix.os }}-${{ matrix.arch }}"
+          }
+        shell: pwsh
+
+      - name: 上传产物
+        uses: actions/upload-artifact@v4
+        with:
+          name: rust-m3u8-${{ matrix.os }}-${{ matrix.arch }}
+          path: |
+            target/release/rust-m3u8-*
+            !target/release/*.d

@@ -42,7 +42,7 @@ pub struct M3u8Downloader {
     base_url: Option<String>,
     headers: HeaderMap,
     ad_filters: Vec<String>,
-    use_ffmpeg: bool,
+    simple: bool,
 }
 
 impl M3u8Downloader {
@@ -57,7 +57,7 @@ impl M3u8Downloader {
         base_url: Option<String>,
         custom_headers: Vec<String>,
         ad_filters: Vec<String>,
-        use_ffmpeg: bool,
+        simple: bool,
     ) -> Self {
         // 创建默认请求头
         let mut headers = HeaderMap::new();
@@ -92,7 +92,7 @@ impl M3u8Downloader {
             base_url,
             headers,
             ad_filters,
-            use_ffmpeg,
+            simple,
         }
     }
 
@@ -101,7 +101,7 @@ impl M3u8Downloader {
         fs::create_dir_all(&self.temp_dir).await?;
 
         // 解析 M3U8 播放列表（支持嵌套）
-        println!("📋 获取并解析 M3U8 播放列表...");
+        // println!("📋 获取并解析 M3U8 播放列表...");
         let parser = NestedParser::new(self.ad_filters.clone())?;
 
         let nested = if self.url.starts_with("http") {
@@ -128,21 +128,21 @@ impl M3u8Downloader {
 
         // 合并视频片段
         let merger = VideoMerger::new();
-        if self.use_ffmpeg {
-            println!("🎬 使用 FFmpeg 合并视频片段...");
-            merger
-                .merge_with_ffmpeg(&self.temp_dir, &self.output_path, segments)
-                .await?;
-        } else {
-            println!("📝 使用简单合并模式...");
+        if self.simple {
+            // println!("📝 使用简单合并模式...");
             merger
                 .merge_with_rust(&self.temp_dir, &self.output_path, segments)
+                .await?;
+        } else {
+            // println!("🎬 使用 FFmpeg 合并视频片段...");
+            merger
+                .merge_with_ffmpeg(&self.temp_dir, &self.output_path, segments)
                 .await?;
         }
 
         // 清理临时文件
         if !self.keep_temp {
-            println!("🧹 正在清理临时文件...");
+            // println!("🧹 正在清理临时文件...");
             fs::remove_dir_all(&self.temp_dir).await?;
         }
 
@@ -152,50 +152,35 @@ impl M3u8Downloader {
     /// 显示播放列表信息（支持嵌套播放列表）
     fn display_playlist_info(&self, nested: &NestedM3u8) {
         if let Some(selected_playlist) = nested.get_selected_variant() {
-            let is_nested = nested.master_playlist.is_nested();
+            // if nested.master_playlist.is_nested() {
+            //     println!("🎯 检测到嵌套播放列表（主播放列表）, 📊 可用变体流数量: {}", nested.master_playlist.variants.len());
+            //     // 显示变体流信息
+            //     for (index, variant) in nested.master_playlist.variants.iter().enumerate() {
+            //         let quality_info = if let Some(bandwidth) = variant.bandwidth {
+            //             if let Some((width, height)) = variant.resolution {
+            //                 format!("{}x{} @ {} kbps", width, height, bandwidth / 1000)
+            //             } else {
+            //                 format!("{} kbps", bandwidth / 1000)
+            //             }
+            //         } else {
+            //             "未知质量".to_string()
+            //         };
+            //         let selected_marker = if nested.selected_variant_index == Some(index) {
+            //             "✅ 当前选择"
+            //         } else {
+            //             "  "
+            //         };
+            //         println!("   {} [{}] {}", selected_marker, index, quality_info);
+            //     }
+            //     println!();
+            // }
 
-            if is_nested {
-                println!("🎯 检测到嵌套播放列表（主播放列表）");
-                println!(
-                    "📊 可用变体流数量: {}",
-                    nested.master_playlist.variants.len()
-                );
-
-                // 显示变体流信息
-                for (index, variant) in nested.master_playlist.variants.iter().enumerate() {
-                    let quality_info = if let Some(bandwidth) = variant.bandwidth {
-                        if let Some((width, height)) = variant.resolution {
-                            format!("{}x{} @ {} kbps", width, height, bandwidth / 1000)
-                        } else {
-                            format!("{} kbps", bandwidth / 1000)
-                        }
-                    } else {
-                        "未知质量".to_string()
-                    };
-
-                    let selected_marker = if nested.selected_variant_index == Some(index) {
-                        "✅ 当前选择"
-                    } else {
-                        "  "
-                    };
-
-                    println!("   {} [{}] {}", selected_marker, index, quality_info);
-                }
-                println!();
-            }
-
-            println!(
-                "💻 版本：{}, 🎥 播放列表类型: {}, 🚫 广告检出数: {}",
-                selected_playlist.version,
+            print!(
+                "🎥 播放列表类型: {}, 🚫 广告检出数: {}, 📊 共 {} 个视频片段, 🕒 总时长约: {}",
                 selected_playlist.playlist_type,
-                selected_playlist.ads_count
-            );
-
-            println!(
-                "📊 共 {} 个视频片段, 🕒 总时长约: {}, ⏳ 最大时长: {:.1} 秒",
+                selected_playlist.ads_count,
                 selected_playlist.segments.len(),
                 format_duration(&selected_playlist.segments),
-                selected_playlist.target_duration
             );
 
             if selected_playlist.is_live {

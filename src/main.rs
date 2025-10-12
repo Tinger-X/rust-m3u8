@@ -25,6 +25,10 @@ struct Args {
     #[arg(short, long, default_value = "3")]
     retry: usize,
 
+    /// 使用 简单方式 合并视频片段，默认使用 ffmpeg
+    #[arg(long, long)]
+    simple: bool,
+
     /// 代理配置，格式: "weight,proxy_url"，可多次指定
     #[arg(short, long, action = clap::ArgAction::Append)]
     proxy: Vec<String>,
@@ -44,10 +48,6 @@ struct Args {
     /// 下载完成后是否保留临时文件
     #[arg(long)]
     keep_temp: bool,
-
-    /// 使用系统 FFmpeg 合并视频片段
-    #[arg(long)]
-    use_ffmpeg: bool,
 }
 
 #[tokio::main]
@@ -72,12 +72,9 @@ async fn main() -> Result<(), M3u8Error> {
     };
 
     println!(
-        "已配置: 🌐 代理 {} 个, 🚫 广告过滤规则 {} 条",
+        "已配置: 🌐 代理 {} 个, 🚫 广告过滤规则 {} 条\n📁 输出文件: {}.mp4, 🔄 并发数量: {}, 🔁 最大重试: {} 次",
         proxy_count,
-        args.filter.len()
-    );
-    println!(
-        "📁 输出文件: {}.mp4, 🔄 并发数量: {}, 🔁 最大重试: {} 次",
+        args.filter.len(),
         args.output, args.concurrent, args.retry
     );
 
@@ -92,11 +89,9 @@ async fn main() -> Result<(), M3u8Error> {
         args.base,
         args.header,
         args.filter,
-        args.use_ffmpeg,
+        args.simple,
     );
 
     downloader.download().await?;
-
-    println!("✅ 下载完成！");
     Ok(())
 }

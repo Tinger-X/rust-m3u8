@@ -52,8 +52,7 @@ rust-m3u8 https://example.com/playlist.m3u8 \
   -p "10,http://proxy1:8080" \
   -p "15,http://proxy2:8080" \
   -f "ad\\." \
-  -f "tracking\\." \
-  --use-ffmpeg
+  -f "tracking\\."
 ```
 
 ## 📚 使用示例

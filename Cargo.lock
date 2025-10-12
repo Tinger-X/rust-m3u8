@@ -1049,7 +1049,7 @@ dependencies = [
 
 [[package]]
 name = "rust-m3u8"
-version = "1.2.0"
+version = "1.2.1"
 dependencies = [
  "anyhow",
  "clap",
