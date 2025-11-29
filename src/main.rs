@@ -57,14 +57,14 @@ async fn main() -> Result<(), M3u8Error> {
     // 解析代理配置
     let mut proxy_count: u32 = 0;
     let proxy_config = if !args.proxy.is_empty() {
-        match ProxyConfig::from_args(&args.proxy) {
+        match ProxyConfig::from_args(&args.proxy).await {
             Ok(config) => {
                 proxy_count = config.len() as u32;
                 Some(config)
             }
             Err(e) => {
                 eprintln!("❌ 代理配置错误: {}", e);
-                return Err(M3u8Error::ParseError(e));
+                None
             }
         }
     } else {
@@ -104,7 +104,7 @@ async fn main() -> Result<(), M3u8Error> {
         args.header,
         args.filter,
         args.simple,
-    );
+    )?;
 
     downloader.download().await?;
     Ok(())

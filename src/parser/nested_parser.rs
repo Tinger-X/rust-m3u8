@@ -33,7 +33,7 @@ impl NestedParser {
 
         if let Some(proxy_config) = proxy_config {
             if let Some(proxy_url) = proxy_config.get_random_proxy() {
-                let proxy = reqwest::Proxy::http(proxy_url)
+                let proxy = reqwest::Proxy::all(proxy_url)
                     .map_err(|e| M3u8Error::ParseError(format!("代理配置错误: {}", e)))?;
                 client_builder = client_builder.proxy(proxy);
             }

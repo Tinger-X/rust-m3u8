@@ -4,7 +4,6 @@ use crate::parser::nested_parser::NestedParser;
 use crate::proxy::ProxyConfig;
 use crate::types::M3u8Segment;
 use crate::types::NestedM3u8;
-use futures::stream::{self, StreamExt};
 use indicatif::{ProgressBar, ProgressStyle};
 use reqwest::header::{HeaderMap, HeaderName, HeaderValue, ACCEPT, ACCEPT_ENCODING, USER_AGENT};
 use std::path::PathBuf;
@@ -14,6 +13,7 @@ use std::sync::Arc;
 use std::time::Duration;
 use tokio::fs;
 use tokio::io::AsyncWriteExt;
+use tokio::sync::Semaphore;
 
 fn format_duration(segments: &[M3u8Segment]) -> String {
     let total_seconds = segments.iter().map(|s| s.duration).sum::<f64>();
@@ -49,11 +49,41 @@ fn format_size(size: u64, suffix: Option<&str>) -> String {
     }
 }
 
+fn create_client_pool(
+    proxy_config: &Option<ProxyConfig>,
+    pool_size: usize,
+) -> Result<Arc<Vec<reqwest::Client>>, M3u8Error> {
+    let mut clients = Vec::with_capacity(pool_size);
+
+    for _ in 0..pool_size {
+        let client_builder = reqwest::Client::builder()
+            .timeout(Duration::from_secs(30))
+            .pool_max_idle_per_host(10)
+            .pool_idle_timeout(Duration::from_secs(30));
+
+        let client = if let Some(proxy_config) = proxy_config {
+            // 如果有代理配置，为每个客户端随机选择一个代理
+            if let Some(proxy_url) = proxy_config.get_random_proxy() {
+                let proxy = reqwest::Proxy::all(proxy_url)
+                    .map_err(|e| M3u8Error::ParseError(format!("代理配置错误: {}", e)))?;
+                client_builder.proxy(proxy).build()?
+            } else {
+                client_builder.build()?
+            }
+        } else {
+            client_builder.build()?
+        };
+
+        clients.push(client);
+    }
+
+    Ok(Arc::new(clients))
+}
+
 pub struct M3u8Downloader {
     url: String,
     output_path: PathBuf,
     temp_dir: PathBuf,
-    concurrent_limit: usize,
     keep_temp: bool,
     proxy_config: Option<ProxyConfig>,
     max_retries: usize,
@@ -61,6 +91,8 @@ pub struct M3u8Downloader {
     headers: HeaderMap,
     ad_filters: Vec<String>,
     simple: bool,
+    client_pool: Arc<Vec<reqwest::Client>>,
+    client_semaphore: Arc<Semaphore>,
 }
 
 impl M3u8Downloader {
@@ -76,7 +108,7 @@ impl M3u8Downloader {
         custom_headers: Vec<String>,
         ad_filters: Vec<String>,
         simple: bool,
-    ) -> Self {
+    ) -> Result<Self, M3u8Error> {
         // 创建默认请求头
         let mut headers = HeaderMap::new();
         headers.insert(USER_AGENT, HeaderValue::from_static("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"));
@@ -99,11 +131,14 @@ impl M3u8Downloader {
             }
         }
 
-        Self {
+        // 创建客户端池
+        let client_pool = create_client_pool(&proxy_config, concurrent_limit)?;
+        let client_semaphore = Arc::new(Semaphore::new(concurrent_limit));
+
+        Ok(Self {
             url,
             output_path,
             temp_dir,
-            concurrent_limit,
             keep_temp,
             proxy_config,
             max_retries,
@@ -111,7 +146,9 @@ impl M3u8Downloader {
             headers,
             ad_filters,
             simple,
-        }
+            client_pool,
+            client_semaphore,
+        })
     }
 
     pub async fn download(&self) -> Result<(), M3u8Error> {
@@ -174,8 +211,6 @@ impl M3u8Downloader {
     }
 
     async fn download_segments(&self, segments: &[M3u8Segment]) -> Result<(), M3u8Error> {
-        let client = Arc::new(reqwest::Client::builder().build()?);
-        let temp_dir = Arc::new(self.temp_dir.clone());
         let total_bytes = Arc::new(AtomicU64::new(0));
         let last_update = Arc::new(AtomicU64::new(0));
         let progress_bar = ProgressBar::new(segments.len() as u64);
@@ -206,32 +241,62 @@ impl M3u8Downloader {
                 }
             }
         });
-        // 使用流来限制并发数量
-        let results: Vec<Result<(), M3u8Error>> = stream::iter(segments.iter())
-            .map(async |segment| {
-                let client = Arc::clone(&client);
-                let temp_dir = Arc::clone(&temp_dir);
-                let segment = segment.clone();
-                let proxy_config = self.proxy_config.clone();
-                let headers = self.headers.clone();
-                let total_bytes_task = Arc::clone(&total_bytes);
 
+        // 使用 JoinSet 进行并发下载
+        use tokio::task::JoinSet;
+        let mut join_set = JoinSet::new();
+
+        let temp_dir = self.temp_dir.clone();
+        let max_retries = self.max_retries;
+        let client_pool = Arc::clone(&self.client_pool);
+        let client_semaphore = Arc::clone(&self.client_semaphore);
+        let headers = self.headers.clone();
+
+        // 为每个分片创建下载任务
+        for segment in segments.iter() {
+            let total_bytes_task = Arc::clone(&total_bytes);
+            let progress_bar_task = Arc::clone(&segment_bar);
+            let segment_clone = segment.clone();
+            let temp_dir_clone = temp_dir.clone();
+            let headers_clone = headers.clone();
+            let client_pool_clone = Arc::clone(&client_pool);
+            let client_semaphore_clone = Arc::clone(&client_semaphore);
+
+            join_set.spawn(async move {
                 let result = Self::download_single_segment(
-                    &client,
-                    &temp_dir,
-                    &segment,
-                    proxy_config.as_ref(),
-                    &headers,
-                    self.max_retries,
+                    &segment_clone,
                     &total_bytes_task,
+                    &temp_dir_clone,
+                    max_retries,
+                    &client_pool_clone,
+                    &client_semaphore_clone,
+                    &headers_clone,
                 )
                 .await;
-                segment_bar.inc(1);
+
+                // 无论成功与否，都更新进度条
+                progress_bar_task.inc(1);
                 result
-            })
-            .buffer_unordered(self.concurrent_limit)
-            .collect()
-            .await;
+            });
+        }
+
+        // 等待所有下载任务完成
+        let mut download_results = Vec::new();
+        while let Some(task_result) = join_set.join_next().await {
+            match task_result {
+                Ok(download_result) => {
+                    download_results.push(download_result);
+                }
+                Err(join_error) => {
+                    // 如果任务本身失败（比如 panic），记录错误
+                    download_results.push(Err(M3u8Error::ParseError(format!(
+                        "下载任务异常: {}",
+                        join_error
+                    ))));
+                }
+            }
+        }
+
         speed_update_handle.abort();
 
         progress_bar.finish_with_message(format!(
@@ -239,7 +304,8 @@ impl M3u8Downloader {
             format_size(total_bytes.load(Ordering::Relaxed), None)
         ));
 
-        for result in results {
+        // 检查所有下载结果
+        for result in download_results {
             result?;
         }
 
@@ -247,13 +313,13 @@ impl M3u8Downloader {
     }
 
     async fn download_single_segment(
-        client: &reqwest::Client,
-        temp_dir: &PathBuf,
         segment: &M3u8Segment,
-        proxy_config: Option<&ProxyConfig>,
-        headers: &HeaderMap,
-        max_retries: usize,
         total_bytes: &Arc<AtomicU64>,
+        temp_dir: &PathBuf,
+        max_retries: usize,
+        client_pool: &Arc<Vec<reqwest::Client>>,
+        client_semaphore: &Arc<Semaphore>,
+        headers: &HeaderMap,
     ) -> Result<(), M3u8Error> {
         let file_name = format!("seg{:06}.ts", segment.sequence);
         let file_path = temp_dir.join(&file_name);
@@ -264,12 +330,12 @@ impl M3u8Downloader {
         let mut retry_count = 0;
         while retry_count < max_retries {
             match Self::try_download_segment(
-                client,
                 &segment.url,
                 &file_path,
-                proxy_config,
-                headers,
                 total_bytes,
+                client_pool,
+                client_semaphore,
+                headers,
             )
             .await
             {
@@ -295,58 +361,36 @@ impl M3u8Downloader {
     }
 
     async fn try_download_segment(
-        client: &reqwest::Client,
         url: &str,
         file_path: &PathBuf,
-        proxy_config: Option<&ProxyConfig>,
-        headers: &HeaderMap,
         total_bytes: &Arc<AtomicU64>,
+        client_pool: &Arc<Vec<reqwest::Client>>,
+        client_semaphore: &Arc<Semaphore>,
+        headers: &HeaderMap,
     ) -> Result<(), M3u8Error> {
-        // 如果配置了代理，为这个请求单独选择一个代理
-        if let Some(proxy_config) = proxy_config {
-            if let Some(proxy_url) = proxy_config.get_random_proxy() {
-                let proxy_client = reqwest::Client::builder()
-                    .proxy(
-                        reqwest::Proxy::http(proxy_url)
-                            .map_err(|e| M3u8Error::ParseError(format!("代理配置错误: {}", e)))?,
-                    )
-                    .build()?;
-                let response = proxy_client
-                    .get(url)
-                    .headers(headers.clone())
-                    .send()
-                    .await?;
+        // 获取客户端信号量许可
+        let _permit = client_semaphore
+            .acquire()
+            .await
+            .map_err(|e| M3u8Error::ParseError(format!("获取客户端许可失败: {}", e)))?;
 
-                if !response.status().is_success() {
-                    return Err(M3u8Error::ParseError(format!(
-                        "HTTP 请求失败: {}",
-                        response.status()
-                    )));
-                }
-
-                let bytes = response.bytes().await?;
-                total_bytes.fetch_add(bytes.len() as u64, Ordering::Relaxed);
-                let mut file = fs::File::create(file_path).await?;
-                file.write_all(&bytes).await?;
-                file.flush().await?;
-                return Ok(());
-            }
-        }
-
-        // 没有代理或代理选择失败时使用默认客户端
+        // 从客户端池中随机选择一个客户端
+        let client_index = rand::random::<usize>() % client_pool.len();
+        let client = &client_pool[client_index];
         let response = client.get(url).headers(headers.clone()).send().await?;
+
         if !response.status().is_success() {
             return Err(M3u8Error::ParseError(format!(
                 "HTTP 请求失败: {}",
                 response.status()
             )));
         }
+
         let bytes = response.bytes().await?;
         total_bytes.fetch_add(bytes.len() as u64, Ordering::Relaxed);
         let mut file = fs::File::create(file_path).await?;
         file.write_all(&bytes).await?;
         file.flush().await?;
-
-        Ok(())
+        return Ok(());
     }
 }
