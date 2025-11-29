@@ -3,7 +3,7 @@ use crate::types::PlaylistType;
 use regex::Regex;
 use url::Url;
 
-/// M3U8 内容解析器 - 负责解析播放列表内容
+// M3U8 内容解析器 - 负责解析播放列表内容
 pub struct ContentParser {
     ad_filters: Vec<Regex>,
 }
@@ -23,7 +23,7 @@ impl ContentParser {
         })
     }
 
-    /// 解析播放列表内容并确定类型
+    // 解析播放列表内容并确定类型
     pub fn parse_content_type(&self, content: &str) -> PlaylistType {
         let lines: Vec<&str> = content.lines().collect();
 
@@ -49,12 +49,12 @@ impl ContentParser {
         PlaylistType::Unknown
     }
 
-    /// 检查 URL 是否为广告
+    // 检查 URL 是否为广告
     pub fn is_ad_url(&self, url: &str) -> bool {
         self.ad_filters.iter().any(|regex| regex.is_match(url))
     }
 
-    /// 构建完整的 URL
+    // 构建完整的 URL
     pub fn build_full_url(&self, url: &str, base_url: Option<&Url>) -> Result<String, M3u8Error> {
         if url.starts_with("http") {
             Ok(url.to_string())
@@ -67,7 +67,7 @@ impl ContentParser {
         }
     }
 
-    /// 解析 EXTINF 行
+    // 解析 EXTINF 行
     pub fn parse_extinf_line(&self, line: &str) -> (f64, Option<String>) {
         let parts: Vec<&str> = line.split(':').collect();
         if parts.len() < 2 {
@@ -82,7 +82,7 @@ impl ContentParser {
         (duration, title)
     }
 
-    /// 解析 EXT-X-STREAM-INF 行
+    // 解析 EXT-X-STREAM-INF 行
     pub fn parse_stream_inf_line(
         &self,
         line: &str,

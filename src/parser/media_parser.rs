@@ -3,7 +3,7 @@ use crate::parser::ContentParser;
 use crate::types::{M3u8Playlist, M3u8Segment, PlaylistType};
 use url::Url;
 
-/// 媒体播放列表解析器 - 负责解析包含具体片段的媒体播放列表
+// 媒体播放列表解析器 - 负责解析包含具体片段的媒体播放列表
 pub struct MediaParser {
     content_parser: ContentParser,
 }
@@ -15,7 +15,7 @@ impl MediaParser {
         })
     }
 
-    /// 解析媒体播放列表内容
+    // 解析媒体播放列表内容
     pub fn parse(&self, content: &str, base_url: Option<&Url>) -> Result<M3u8Playlist, M3u8Error> {
         let mut playlist = M3u8Playlist::new(PlaylistType::Media);
         let lines: Vec<&str> = content.lines().collect();
@@ -115,7 +115,7 @@ impl MediaParser {
         Ok(playlist)
     }
 
-    /// 解析字节范围
+    // 解析字节范围
     fn parse_byte_range(&self, line: &str) -> Option<(usize, usize)> {
         let content = line.strip_prefix("#EXT-X-BYTERANGE:")?;
         let parts: Vec<&str> = content.split('@').collect();

@@ -20,7 +20,7 @@ impl VideoMerger {
         let mut output_file = fs::File::create(output_path).await?;
 
         for index in 0..segments.len() {
-            let segment_path = temp_dir.join(format!("segment_{:06}.ts", index));
+            let segment_path = temp_dir.join(format!("seg{:06}.ts", index));
 
             if !segment_path.exists() {
                 return Err(M3u8Error::MergeError(format!(
@@ -54,7 +54,7 @@ impl VideoMerger {
 
         // 检查所有片段文件是否存在，并创建文件列表
         for index in 0..segments.len() {
-            let segment_path = temp_dir.join(format!("segment_{:06}.ts", index));
+            let segment_path = temp_dir.join(format!("seg{:06}.ts", index));
 
             if !segment_path.exists() {
                 return Err(M3u8Error::MergeError(format!(
@@ -96,7 +96,10 @@ impl VideoMerger {
             Ok(output) => {
                 if !output.status.success() {
                     let error_msg = String::from_utf8_lossy(&output.stderr);
-                    println!("⚠️  FFmpeg 合并失败，回退到简单合并模式。 错误信息: {}", error_msg);
+                    println!(
+                        "⚠️  FFmpeg 合并失败，回退到简单合并模式。 错误信息: {}",
+                        error_msg
+                    );
 
                     // 回退到简单合并
                     return self.merge_with_rust(temp_dir, output_path, segments).await;

@@ -5,7 +5,7 @@ use crate::types::{M3u8Playlist, M3u8Segment, NestedM3u8, PlaylistType};
 use reqwest::header::HeaderMap;
 use url::Url;
 
-/// 嵌套播放列表解析器 - 负责处理包含主播放列表和多个媒体播放列表的嵌套结构
+// 嵌套播放列表解析器 - 负责处理包含主播放列表和多个媒体播放列表的嵌套结构
 pub struct NestedParser {
     content_parser: ContentParser,
     master_parser: MasterParser,
@@ -21,7 +21,7 @@ impl NestedParser {
         })
     }
 
-    /// 从 URL 解析嵌套播放列表
+    // 从 URL 解析嵌套播放列表
     pub async fn parse_from_url(
         &self,
         url: &str,
@@ -46,7 +46,7 @@ impl NestedParser {
         self.parse_content(&content, Some(url)).await
     }
 
-    /// 从文件解析嵌套播放列表
+    // 从文件解析嵌套播放列表
     pub async fn parse_from_file(
         &self,
         file_path: &str,
@@ -59,7 +59,7 @@ impl NestedParser {
         self.parse_content(&content, base_url).await
     }
 
-    /// 解析嵌套播放列表内容
+    // 解析嵌套播放列表内容
     pub async fn parse_content(
         &self,
         content: &str,
@@ -86,7 +86,7 @@ impl NestedParser {
         }
     }
 
-    /// 解析主播放列表及其所有变体流
+    // 解析主播放列表及其所有变体流
     async fn parse_master_playlist(
         &self,
         content: &str,
@@ -112,7 +112,7 @@ impl NestedParser {
         Ok(nested)
     }
 
-    /// 解析单个变体流播放列表
+    // 解析单个变体流播放列表
     async fn parse_variant_playlist(&self, url: &str) -> Result<M3u8Playlist, M3u8Error> {
         // 创建 HTTP 客户端
         let client = reqwest::Client::builder().build()?;
@@ -132,7 +132,7 @@ impl NestedParser {
         self.media_parser.parse(&content, base_url_obj.as_ref())
     }
 
-    /// 解析单个媒体播放列表并包装为嵌套结构
+    // 解析单个媒体播放列表并包装为嵌套结构
     async fn parse_single_media_playlist(
         &self,
         content: &str,
@@ -148,7 +148,7 @@ impl NestedParser {
         Ok(nested)
     }
 
-    /// 获取当前选中的播放列表的所有片段
+    // 获取当前选中的播放列表的所有片段
     pub fn get_selected_segments<'a>(
         &self,
         nested: &'a NestedM3u8,
@@ -158,7 +158,7 @@ impl NestedParser {
             .map(move |playlist| &playlist.segments)
     }
 
-    /// 获取所有变体流的信息
+    // 获取所有变体流的信息
     pub fn get_variants_info(&self, nested: &NestedM3u8) -> Vec<(usize, String)> {
         nested
             .master_playlist

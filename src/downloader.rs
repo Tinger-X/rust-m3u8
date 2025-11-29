@@ -9,11 +9,12 @@ use indicatif::{ProgressBar, ProgressStyle};
 use reqwest::header::{HeaderMap, HeaderName, HeaderValue, ACCEPT, ACCEPT_ENCODING, USER_AGENT};
 use std::path::PathBuf;
 use std::str::FromStr;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
+use std::time::Duration;
 use tokio::fs;
 use tokio::io::AsyncWriteExt;
 
-/// 将秒数转换为人类可读的时长格式
 fn format_duration(segments: &[M3u8Segment]) -> String {
     let total_seconds = segments.iter().map(|s| s.duration).sum::<f64>();
 
@@ -28,6 +29,23 @@ fn format_duration(segments: &[M3u8Segment]) -> String {
         let minutes = ((total_seconds % 3600.0) / 60.0) as u32;
         let seconds = (total_seconds % 60.0) as u32;
         format!("{:02}:{:02}:{:02} s", hours, minutes, seconds)
+    }
+}
+
+fn format_size(size: u64, suffix: Option<&str>) -> String {
+    let suffix = suffix.unwrap_or("");
+    if size >= 1024 * 1024 * 1024 {
+        format!(
+            "{:.2}GB{}",
+            size as f64 / (1024.0 * 1024.0 * 1024.0),
+            suffix
+        )
+    } else if size >= 1024 * 1024 {
+        format!("{:.2}MB{}", size as f64 / (1024.0 * 1024.0), suffix)
+    } else if size >= 1024 {
+        format!("{:.2}KB{}", size as f64 / 1024.0, suffix)
+    } else {
+        format!("{}B{}", size, suffix)
     }
 }
 
@@ -100,10 +118,7 @@ impl M3u8Downloader {
         // 创建临时目录
         fs::create_dir_all(&self.temp_dir).await?;
 
-        // 解析 M3U8 播放列表（支持嵌套）
-        // println!("📋 获取并解析 M3U8 播放列表...");
         let parser = NestedParser::new(self.ad_filters.clone())?;
-
         let nested = if self.url.starts_with("http") {
             parser
                 .parse_from_url(&self.url, self.proxy_config.as_ref(), &self.headers)
@@ -114,132 +129,116 @@ impl M3u8Downloader {
                 .await?
         };
 
-        // 显示播放列表信息
         self.display_playlist_info(&nested);
-
-        // 获取当前选中的播放列表片段
         let segments = nested
             .get_selected_variant()
             .map(|playlist| &playlist.segments)
             .ok_or_else(|| M3u8Error::ParseError("未找到有效的播放列表片段".to_string()))?;
-
-        // 下载所有片段
         self.download_segments(segments).await?;
-
-        // 合并视频片段
         let merger = VideoMerger::new();
         if self.simple {
-            // println!("📝 使用简单合并模式...");
             merger
                 .merge_with_rust(&self.temp_dir, &self.output_path, segments)
                 .await?;
         } else {
-            // println!("🎬 使用 FFmpeg 合并视频片段...");
             merger
                 .merge_with_ffmpeg(&self.temp_dir, &self.output_path, segments)
                 .await?;
         }
-
-        // 清理临时文件
         if !self.keep_temp {
-            // println!("🧹 正在清理临时文件...");
             fs::remove_dir_all(&self.temp_dir).await?;
         }
 
         Ok(())
     }
 
-    /// 显示播放列表信息（支持嵌套播放列表）
     fn display_playlist_info(&self, nested: &NestedM3u8) {
         if let Some(selected_playlist) = nested.get_selected_variant() {
-            // if nested.master_playlist.is_nested() {
-            //     println!("🎯 检测到嵌套播放列表（主播放列表）, 📊 可用变体流数量: {}", nested.master_playlist.variants.len());
-            //     // 显示变体流信息
-            //     for (index, variant) in nested.master_playlist.variants.iter().enumerate() {
-            //         let quality_info = if let Some(bandwidth) = variant.bandwidth {
-            //             if let Some((width, height)) = variant.resolution {
-            //                 format!("{}x{} @ {} kbps", width, height, bandwidth / 1000)
-            //             } else {
-            //                 format!("{} kbps", bandwidth / 1000)
-            //             }
-            //         } else {
-            //             "未知质量".to_string()
-            //         };
-            //         let selected_marker = if nested.selected_variant_index == Some(index) {
-            //             "✅ 当前选择"
-            //         } else {
-            //             "  "
-            //         };
-            //         println!("   {} [{}] {}", selected_marker, index, quality_info);
-            //     }
-            //     println!();
-            // }
+            let mut info_parts = Vec::new();
+            info_parts.push(format!("📊 {} 个片段", selected_playlist.segments.len()));
+            info_parts.push(format!(
+                "🕒 {}",
+                format_duration(&selected_playlist.segments)
+            ));
 
-            print!(
-                "🎥 播放列表类型: {}, 🚫 广告检出数: {}, 📊 共 {} 个视频片段, 🕒 总时长约: {}, ",
-                selected_playlist.playlist_type,
-                selected_playlist.ads_count,
-                selected_playlist.segments.len(),
-                format_duration(&selected_playlist.segments),
-            );
+            if selected_playlist.ads_count > 0 {
+                info_parts.push(format!("🚫 广告 {} 个", selected_playlist.ads_count));
+            }
 
             if selected_playlist.is_live {
-                println!("📡 直播流模式");
-            } else {
-                println!("🎬 点播流模式");
+                info_parts.push("📡 直播流".to_string());
             }
-            println!();
+
+            println!("{}\n", info_parts.join(", "));
         }
     }
 
     async fn download_segments(&self, segments: &[M3u8Segment]) -> Result<(), M3u8Error> {
-        // 创建基础 HTTP 客户端
         let client = Arc::new(reqwest::Client::builder().build()?);
         let temp_dir = Arc::new(self.temp_dir.clone());
-
-        // 创建增强的进度条
+        let total_bytes = Arc::new(AtomicU64::new(0));
+        let last_update = Arc::new(AtomicU64::new(0));
         let progress_bar = ProgressBar::new(segments.len() as u64);
         progress_bar.set_style(
             ProgressStyle::default_bar()
                 .template("{spinner:.green} [{elapsed_precise}] |{bar:50.cyan/blue}| {pos}/{len}: {percent}%, ETA: {eta}, {msg}")
                 .unwrap()
-                .progress_chars("█▓░"),
+                .progress_chars("⣿⣷⣶⣦⣤⣄⣀ "),
         );
-        progress_bar.set_message(format!("{:06}.ts", 0));
+        progress_bar.set_message("...");
 
         let progress_bar = Arc::new(progress_bar);
+        let total_bytes_clone = Arc::clone(&total_bytes);
+        let last_update_clone = Arc::clone(&last_update);
+        let speed_bar = Arc::clone(&progress_bar);
+        let segment_bar = Arc::clone(&progress_bar);
+
+        // 启动速度更新任务
+        let speed_update_handle = tokio::spawn(async move {
+            let mut interval = tokio::time::interval(Duration::from_secs(1));
+            loop {
+                interval.tick().await;
+                let current_bytes = total_bytes_clone.load(Ordering::Relaxed);
+                let last_bytes = last_update_clone.swap(current_bytes, Ordering::Relaxed);
+
+                if last_bytes > 0 {
+                    speed_bar.set_message(format_size(current_bytes - last_bytes, Some("/s")));
+                }
+            }
+        });
         // 使用流来限制并发数量
         let results: Vec<Result<(), M3u8Error>> = stream::iter(segments.iter())
-            .map(|segment| {
+            .map(async |segment| {
                 let client = Arc::clone(&client);
                 let temp_dir = Arc::clone(&temp_dir);
-                let progress_bar = Arc::clone(&progress_bar);
                 let segment = segment.clone();
                 let proxy_config = self.proxy_config.clone();
                 let headers = self.headers.clone();
+                let total_bytes_task = Arc::clone(&total_bytes);
 
-                async move {
-                    let result = Self::download_single_segment(
-                        &client,
-                        &temp_dir,
-                        &segment,
-                        proxy_config.as_ref(),
-                        &headers,
-                        self.max_retries,
-                    )
-                    .await;
-                    progress_bar.inc(1);
-                    progress_bar.set_message(format!("{:06}.ts", segment.sequence));
-                    result
-                }
+                let result = Self::download_single_segment(
+                    &client,
+                    &temp_dir,
+                    &segment,
+                    proxy_config.as_ref(),
+                    &headers,
+                    self.max_retries,
+                    &total_bytes_task,
+                )
+                .await;
+                segment_bar.inc(1);
+                result
             })
             .buffer_unordered(self.concurrent_limit)
             .collect()
             .await;
+        speed_update_handle.abort();
 
-        progress_bar.finish_with_message("✅ 下载完成!\n");
+        progress_bar.finish_with_message(format!(
+            "✅ 下载完成! 总下载量: {}\n",
+            format_size(total_bytes.load(Ordering::Relaxed), None)
+        ));
 
-        // 检查是否有下载失败的片段
         for result in results {
             result?;
         }
@@ -254,17 +253,15 @@ impl M3u8Downloader {
         proxy_config: Option<&ProxyConfig>,
         headers: &HeaderMap,
         max_retries: usize,
+        total_bytes: &Arc<AtomicU64>,
     ) -> Result<(), M3u8Error> {
-        let file_name = format!("segment_{:06}.ts", segment.sequence);
+        let file_name = format!("seg{:06}.ts", segment.sequence);
         let file_path = temp_dir.join(&file_name);
-
-        // 如果文件已存在，跳过下载
         if file_path.exists() {
             return Ok(());
         }
 
         let mut retry_count = 0;
-
         while retry_count < max_retries {
             match Self::try_download_segment(
                 client,
@@ -272,6 +269,7 @@ impl M3u8Downloader {
                 &file_path,
                 proxy_config,
                 headers,
+                total_bytes,
             )
             .await
             {
@@ -302,6 +300,7 @@ impl M3u8Downloader {
         file_path: &PathBuf,
         proxy_config: Option<&ProxyConfig>,
         headers: &HeaderMap,
+        total_bytes: &Arc<AtomicU64>,
     ) -> Result<(), M3u8Error> {
         // 如果配置了代理，为这个请求单独选择一个代理
         if let Some(proxy_config) = proxy_config {
@@ -326,6 +325,7 @@ impl M3u8Downloader {
                 }
 
                 let bytes = response.bytes().await?;
+                total_bytes.fetch_add(bytes.len() as u64, Ordering::Relaxed);
                 let mut file = fs::File::create(file_path).await?;
                 file.write_all(&bytes).await?;
                 file.flush().await?;
@@ -335,15 +335,14 @@ impl M3u8Downloader {
 
         // 没有代理或代理选择失败时使用默认客户端
         let response = client.get(url).headers(headers.clone()).send().await?;
-
         if !response.status().is_success() {
             return Err(M3u8Error::ParseError(format!(
                 "HTTP 请求失败: {}",
                 response.status()
             )));
         }
-
         let bytes = response.bytes().await?;
+        total_bytes.fetch_add(bytes.len() as u64, Ordering::Relaxed);
         let mut file = fs::File::create(file_path).await?;
         file.write_all(&bytes).await?;
         file.flush().await?;

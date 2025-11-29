@@ -3,7 +3,7 @@ use crate::parser::ContentParser;
 use crate::types::{M3u8Playlist, M3u8Variant, PlaylistType};
 use url::Url;
 
-/// 主播放列表解析器 - 负责解析包含多个变体流的主播放列表
+// 主播放列表解析器 - 负责解析包含多个变体流的主播放列表
 pub struct MasterParser {
     content_parser: ContentParser,
 }
@@ -15,7 +15,7 @@ impl MasterParser {
         })
     }
 
-    /// 解析主播放列表内容
+    // 解析主播放列表内容
     pub fn parse(&self, content: &str, base_url: Option<&Url>) -> Result<M3u8Playlist, M3u8Error> {
         let mut playlist = M3u8Playlist::new(PlaylistType::Master);
         let lines: Vec<&str> = content.lines().collect();
@@ -72,7 +72,7 @@ impl MasterParser {
         Ok(playlist)
     }
 
-    /// 获取最佳质量的变体流索引
+    // 获取最佳质量的变体流索引
     pub fn get_best_quality_index(&self, playlist: &M3u8Playlist) -> usize {
         let mut best_index = 0;
         let mut best_bandwidth = 0;
@@ -89,7 +89,7 @@ impl MasterParser {
         best_index
     }
 
-    /// 根据分辨率选择变体流索引
+    // 根据分辨率选择变体流索引
     pub fn get_variant_by_resolution(
         &self,
         playlist: &M3u8Playlist,
