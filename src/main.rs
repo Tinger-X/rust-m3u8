@@ -17,16 +17,12 @@ struct Args {
     #[arg(short, long, default_value = "20")]
     concurrent: usize,
 
-    // 临时文件目录
-    #[arg(short, long, default_value = "temp")]
-    temp_dir: String,
-
     // 最大重试次数
     #[arg(short, long, default_value = "3")]
     retry: usize,
 
     // 使用 简单方式 合并视频片段，默认使用 ffmpeg
-    #[arg(long, long)]
+    #[arg(short, long)]
     simple: bool,
 
     // 代理配置，格式: "weight,proxy_url"，可多次指定
@@ -95,7 +91,6 @@ async fn main() -> Result<(), M3u8Error> {
     let downloader = M3u8Downloader::new(
         args.url,
         PathBuf::from(args.output).with_extension("mp4"),
-        PathBuf::from(args.temp_dir),
         args.concurrent,
         args.keep_temp,
         proxy_config,

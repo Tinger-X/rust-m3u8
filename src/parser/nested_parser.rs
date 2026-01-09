@@ -1,8 +1,6 @@
 use crate::error::M3u8Error;
 use crate::parser::{ContentParser, MasterParser, MediaParser};
-use crate::proxy::ProxyConfig;
 use crate::types::{M3u8Playlist, M3u8Segment, NestedM3u8, PlaylistType};
-use reqwest::header::HeaderMap;
 use url::Url;
 
 // 嵌套播放列表解析器 - 负责处理包含主播放列表和多个媒体播放列表的嵌套结构
@@ -25,25 +23,12 @@ impl NestedParser {
     pub async fn parse_from_url(
         &self,
         url: &str,
-        proxy_config: Option<&ProxyConfig>,
-        headers: &HeaderMap,
+        client: &reqwest::Client,
     ) -> Result<NestedM3u8, M3u8Error> {
-        // 创建 HTTP 客户端
-        let mut client_builder = reqwest::Client::builder();
-
-        if let Some(proxy_config) = proxy_config {
-            if let Some(proxy_url) = proxy_config.get_random_proxy() {
-                let proxy = reqwest::Proxy::all(proxy_url)
-                    .map_err(|e| M3u8Error::ParseError(format!("代理配置错误: {}", e)))?;
-                client_builder = client_builder.proxy(proxy);
-            }
-        }
-
-        let client = client_builder.build()?;
-        let response = client.get(url).headers(headers.clone()).send().await?;
+        let response = client.get(url).send().await?;
         let content = response.text().await?;
 
-        self.parse_content(&content, Some(url)).await
+        self.parse_content(&content, Some(url), client).await
     }
 
     // 从文件解析嵌套播放列表
@@ -51,12 +36,13 @@ impl NestedParser {
         &self,
         file_path: &str,
         base_url: Option<&str>,
+        client: &reqwest::Client,
     ) -> Result<NestedM3u8, M3u8Error> {
         let content = tokio::fs::read_to_string(file_path)
             .await
             .map_err(|e| M3u8Error::Io(e))?;
 
-        self.parse_content(&content, base_url).await
+        self.parse_content(&content, base_url, &client).await
     }
 
     // 解析嵌套播放列表内容
@@ -64,6 +50,7 @@ impl NestedParser {
         &self,
         content: &str,
         base_url: Option<&str>,
+        client: &reqwest::Client,
     ) -> Result<NestedM3u8, M3u8Error> {
         let base_url_obj = base_url.and_then(|url| Url::parse(url).ok());
 
@@ -73,7 +60,7 @@ impl NestedParser {
         match playlist_type {
             PlaylistType::Master => {
                 // 这是主播放列表，需要递归解析所有变体流
-                self.parse_master_playlist(content, &base_url_obj).await
+                self.parse_master_playlist(content, &base_url_obj, client).await
             }
             PlaylistType::Media => {
                 // 这是媒体播放列表，直接包装为嵌套结构
@@ -91,6 +78,7 @@ impl NestedParser {
         &self,
         content: &str,
         base_url: &Option<Url>,
+        client: &reqwest::Client,
     ) -> Result<NestedM3u8, M3u8Error> {
         let mut nested = NestedM3u8::new();
 
@@ -99,7 +87,7 @@ impl NestedParser {
 
         // 递归解析所有变体流
         for variant in &nested.master_playlist.variants {
-            let media_playlist = self.parse_variant_playlist(&variant.url).await?;
+            let media_playlist = self.parse_variant_playlist(&variant.url, client).await?;
             nested.media_playlists.push(media_playlist);
         }
 
@@ -113,9 +101,11 @@ impl NestedParser {
     }
 
     // 解析单个变体流播放列表
-    async fn parse_variant_playlist(&self, url: &str) -> Result<M3u8Playlist, M3u8Error> {
-        // 创建 HTTP 客户端
-        let client = reqwest::Client::builder().build()?;
+    async fn parse_variant_playlist(
+        &self,
+        url: &str,
+        client: &reqwest::Client,
+    ) -> Result<M3u8Playlist, M3u8Error> {
         let response = client.get(url).send().await?;
 
         if !response.status().is_success() {

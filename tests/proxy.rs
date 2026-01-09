@@ -4,10 +4,10 @@ use std::io::Write;
 use std::time::Duration;
 use tokio;
 
-#[tokio::main]
-async fn main() -> Result<(), Box<dyn std::error::Error>> {
+#[tokio::test]
+async fn test_proxy() -> Result<(), Box<dyn std::error::Error>> {
     // 设置代理
-    let proxy = reqwest::Proxy::all("113.46.231.8:24975")?;
+    let proxy = reqwest::Proxy::all("127.0.0.1:24975")?;
 
     // 创建客户端
     let client = reqwest::Client::builder()

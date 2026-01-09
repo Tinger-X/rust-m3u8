@@ -5,6 +5,7 @@ use crate::proxy::ProxyConfig;
 use crate::types::M3u8Segment;
 use crate::types::NestedM3u8;
 use indicatif::{ProgressBar, ProgressStyle};
+use md5::Digest;
 use reqwest::header::{HeaderMap, HeaderName, HeaderValue, ACCEPT, ACCEPT_ENCODING, USER_AGENT};
 use std::path::PathBuf;
 use std::str::FromStr;
@@ -14,6 +15,15 @@ use std::time::Duration;
 use tokio::fs;
 use tokio::io::AsyncWriteExt;
 use tokio::sync::Semaphore;
+
+// 根据 URL 生成临时目录名：.tmp_ + url 的 md5 前16位
+fn generate_temp_dir_name(url: &str) -> String {
+    let mut hasher = md5::Md5::new();
+    hasher.update(url.as_bytes());
+    let result = hasher.finalize();
+    let hash_str = format!("{:x}", result);
+    format!(".tmp_{}", &hash_str[..16])
+}
 
 fn format_duration(segments: &[M3u8Segment]) -> String {
     let total_seconds = segments.iter().map(|s| s.duration).sum::<f64>();
@@ -51,12 +61,14 @@ fn format_size(size: u64, suffix: Option<&str>) -> String {
 
 fn create_client_pool(
     proxy_config: &Option<ProxyConfig>,
+    headers: &HeaderMap,
     pool_size: usize,
 ) -> Result<Arc<Vec<reqwest::Client>>, M3u8Error> {
     let mut clients = Vec::with_capacity(pool_size);
 
     for _ in 0..pool_size {
         let client_builder = reqwest::Client::builder()
+            .default_headers(headers.clone())
             .timeout(Duration::from_secs(30))
             .pool_max_idle_per_host(10)
             .pool_idle_timeout(Duration::from_secs(30));
@@ -85,7 +97,6 @@ pub struct M3u8Downloader {
     output_path: PathBuf,
     temp_dir: PathBuf,
     keep_temp: bool,
-    proxy_config: Option<ProxyConfig>,
     max_retries: usize,
     base_url: Option<String>,
     headers: HeaderMap,
@@ -99,7 +110,6 @@ impl M3u8Downloader {
     pub fn new(
         url: String,
         output_path: PathBuf,
-        temp_dir: PathBuf,
         concurrent_limit: usize,
         keep_temp: bool,
         proxy_config: Option<ProxyConfig>,
@@ -132,15 +142,17 @@ impl M3u8Downloader {
         }
 
         // 创建客户端池
-        let client_pool = create_client_pool(&proxy_config, concurrent_limit)?;
-        let client_semaphore = Arc::new(Semaphore::new(concurrent_limit));
+        let client_pool = create_client_pool(&proxy_config, &headers, concurrent_limit + 1)?;
+        let client_semaphore = Arc::new(Semaphore::new(concurrent_limit + 1));
+
+        // 生成临时目录
+        let temp_dir = PathBuf::from(generate_temp_dir_name(&url));
 
         Ok(Self {
             url,
             output_path,
             temp_dir,
             keep_temp,
-            proxy_config,
             max_retries,
             base_url,
             headers,
@@ -158,11 +170,11 @@ impl M3u8Downloader {
         let parser = NestedParser::new(self.ad_filters.clone())?;
         let nested = if self.url.starts_with("http") {
             parser
-                .parse_from_url(&self.url, self.proxy_config.as_ref(), &self.headers)
+                .parse_from_url(&self.url, &self.client_pool[0])
                 .await?
         } else {
             parser
-                .parse_from_file(&self.url, self.base_url.as_deref())
+                .parse_from_file(&self.url, self.base_url.as_deref(), &self.client_pool[0])
                 .await?
         };
 
