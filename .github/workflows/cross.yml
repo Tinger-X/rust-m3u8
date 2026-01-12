@@ -38,11 +38,16 @@ jobs:
             build-essential \
             musl-tools \
             mingw-w64 \
-            gcc-mingw-w64-x86-64 \
-            strip \
-            upx
+            gcc-mingw-w64-x86-64
+          sudo apt clean
 
-      # 步骤4：安装cargo-zigbuild (解决Linux编译macOS产物的SDK缺失问题)
+      # 步骤4：缓存Cargo依赖包，无需重复下载
+      - name: 缓存Cargo依赖
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: ./ -> target
+
+      # 步骤5：安装cargo-zigbuild (解决Linux编译macOS产物的SDK缺失问题)
       - name: 安装cargo-zigbuild
         run: cargo install cargo-zigbuild
 
