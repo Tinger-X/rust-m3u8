@@ -14,10 +14,7 @@ jobs:
         # 主流操作系统
         os: 
           - windows-latest
-          - ubuntu-18.04
-          - ubuntu-20.04
           - ubuntu-22.04
-          - ubuntu-24.04
           - macos-latest
         # 主流架构
         arch: [x86_64, aarch64]
