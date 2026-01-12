@@ -1,97 +1,47 @@
-# .github/workflows/cross_build_parallel.yml (推荐重命名，标识并行版)
-name: Rust-M3U8 跨平台并行编译
+name: 主流平台编译
+
 on:
   push:
     tags:
-      - 'c-*'
-
-# 全局配置：所有job共享权限
-permissions:
-  contents: write # 赋予创建Release、上传产物的权限
+      - "c-*"  # temp `cross build` tags
 
 jobs:
-  # ========== 步骤1：前置准备 - 提取Tag信息+创建产物目录 ==========
-  prepare:
-    name: 前置准备
-    runs-on: ubuntu-latest
-    outputs:
-      TAG_NAME: ${{ steps.extract_tag.outputs.TAG_NAME }} # 剥离c-后的纯净版本号
-      TAG_RAW: ${{ steps.extract_tag.outputs.TAG_RAW }}   # 原始tag名（如c-v1.2.3）
-    steps:
-      - name: 提取Tag名称
-        id: extract_tag
-        run: |
-          TAG_RAW="${{ github.ref_name }}"
-          TAG_NAME="${TAG_RAW#c-}"
-          echo "TAG_NAME=${TAG_NAME}" >> $GITHUB_OUTPUT
-          echo "TAG_RAW=${TAG_RAW}" >> $GITHUB_OUTPUT
-
-  # ========== 步骤2：核心并行编译 ==========
   build:
-    name: 编译 ${{ matrix.target }}
-    needs: prepare # 依赖prepare步骤的版本号输出
-    runs-on: ubuntu-latest
+    name: ${{ matrix.os }}-${{ matrix.arch }}
+    runs-on: ${{ matrix.os }}
     strategy:
-      fail-fast: false # 一个平台编译失败，不影响其他平台（关键！）
       matrix:
-        # ✅ 你的5个指定编译目标，一一对应，完美匹配需求
-        include:
-          - target: x86_64-unknown-linux-musl
-            exe_suffix: ""
-            build_cmd: "cargo build --release --target ${{ matrix.target }}"
-          - target: x86_64-pc-windows-gnu
-            exe_suffix: ".exe"
-            build_cmd: "cargo build --release --target ${{ matrix.target }}"
-          - target: x86_64-pc-windows-msvc
-            exe_suffix: ".exe"
-            build_cmd: "cargo build --release --target ${{ matrix.target }}"
-          - target: x86_64-apple-darwin
-            exe_suffix: ""
-            build_cmd: "cargo zigbuild --release --target ${{ matrix.target }}"
-          - target: aarch64-apple-darwin
-            exe_suffix: ""
-            build_cmd: "cargo zigbuild --release --target ${{ matrix.target }}"
+        # 主流操作系统
+        os: [windows-latest, ubuntu-latest, macos-latest]
+        # 主流架构
+        arch: [x86_64, aarch64]
+        # 排除不可能的组合（如Windows暂不支持aarch64的GitHub Actions runner）
+        exclude:
+          - os: windows-latest
+            arch: aarch64
 
     steps:
-      - name: 检出项目源码
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-
-      - name: 安装Rust稳定版 + 目标平台工具链
+      - uses: actions/checkout@v4
+      - name: "编译代码"
         uses: dtolnay/rust-toolchain@stable
         with:
-          targets: ${{ matrix.target }}
-
-      - name: 安装Ubuntu编译依赖
+          target: ${{ matrix.target.triple }}
+      - run: cargo build --release
+      
+      - name: 准备产物
         run: |
-          sudo apt update && sudo apt install -y build-essential musl-tools mingw-w64 gcc-mingw-w64-x86-64
-          sudo apt clean
-
-      - name: 安装cargo-zigbuild (仅macOS编译需要，解决SDK缺失)
-        run: cargo install cargo-zigbuild
-
-      - name: 缓存Cargo依赖
-        uses: Swatinem/rust-cache@v2
-        with:
-          workspaces: ./ -> target
-          key: ${{ matrix.target }}-${{ hashFiles('**/Cargo.lock') }}
-
-      - name: 执行编译命令
-        run: ${{ matrix.build_cmd }}
-
-      - name: 产物瘦身
-        run: strip ./target/${{ matrix.target }}/release/rust-m3u8${{ matrix.exe_suffix }}
-
-      - name: 重命名
-        run: |
-          mkdir -p ./release-artifacts
-          cp ./target/${{ matrix.target }}/release/rust-m3u8${{ matrix.exe_suffix }} \
-             ./release-artifacts/rust-m3u8-${{ matrix.target }}-${{ needs.prepare.outputs.TAG_NAME }}${{ matrix.exe_suffix }}
+          # 添加平台后缀
+          if ("${{ matrix.os }}" -eq "windows-latest") {
+            Copy-Item "target/release/rust-m3u8.exe" "target/release/rust-m3u8-${{ matrix.os }}-${{ matrix.arch }}.exe"
+          } else {
+            Copy-Item "target/release/rust-m3u8" "target/release/rust-m3u8-${{ matrix.os }}-${{ matrix.arch }}"
+          }
+        shell: pwsh
 
       - name: 上传产物
         uses: actions/upload-artifact@v4
         with:
-          name: build-artifact-${{ matrix.target }}
-          path: ./release-artifacts/
-          retention-days: 90
+          name: rust-m3u8-${{ matrix.os }}-${{ matrix.arch }}
+          path: |
+            target/release/rust-m3u8-*
+            !target/release/*.d
