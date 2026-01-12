@@ -3,45 +3,104 @@ name: 主流平台编译
 on:
   push:
     tags:
-      - "c-*"  # temp `cross build` tags
+      - "c-*"  # 仅推送 c- 开头的tag时触发编译，如 c-v1.0.0、c-v2.1.3
 
 jobs:
   build:
-    name: ${{ matrix.os }}-${{ matrix.arch }}
-    runs-on: ${{ matrix.os }}
+    name: ${{ matrix.label }}
+    runs-on: ${{ matrix.run_os }}
     strategy:
+      fail-fast: false # 单个平台编译失败，不影响其他平台编译
       matrix:
-        # 主流操作系统
-        os: [windows-latest, ubuntu-latest, macos-latest]
-        # 主流架构
-        arch: [x86_64, aarch64]
-        # 排除不可能的组合（如Windows暂不支持aarch64的GitHub Actions runner）
-        exclude:
-          - os: windows-latest
+        include:
+          # Windows x86_64 - 兼容Win10/Win11 全系
+          - run_os: windows-latest
+            os: windows
+            arch: x86_64
+            target: x86_64-pc-windows-msvc
+            label: windows-x86_64
+          # Linux x86_64 - 静态编译，兼容Ubuntu18/20/22/24+所有Linux发行版
+          - run_os: ubuntu-latest
+            os: linux
+            arch: x86_64
+            target: x86_64-unknown-linux-musl
+            label: linux-x86_64
+          # Linux aarch64 - 静态编译，兼容ARM64架构Linux服务器/设备
+          - run_os: ubuntu-latest
+            os: linux
             arch: aarch64
+            target: aarch64-unknown-linux-musl
+            label: linux-aarch64
+          # MacOS x86_64 - Intel芯片（2020及以前Mac设备）
+          - run_os: macos-latest
+            os: macos
+            arch: x86_64
+            target: x86_64-apple-darwin
+            label: macos-x86_64
+          # MacOS aarch64 - 苹果M1/M2/M3芯片（2021及以后新款Mac）
+          - run_os: macos-latest
+            os: macos
+            arch: aarch64
+            target: aarch64-apple-darwin
+            label: macos-aarch64
 
     steps:
-      - uses: actions/checkout@v4
-      - name: "编译代码"
+      - name: 拉取项目源码
+        uses: actions/checkout@v4
+
+      - name: 缓存Cargo依赖包（提速编译，关键优化）
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: .
+          target: ${{ matrix.target }}
+
+      - name: 配置Rust编译环境 + 指定编译目标架构
         uses: dtolnay/rust-toolchain@stable
         with:
-          target: ${{ matrix.target.triple }}
-      - run: cargo build --release
-      
-      - name: 准备产物
-        run: |
-          # 添加平台后缀
-          if ("${{ matrix.os }}" -eq "windows-latest") {
-            Copy-Item "target/release/rust-m3u8.exe" "target/release/rust-m3u8-${{ matrix.os }}-${{ matrix.arch }}.exe"
-          } else {
-            Copy-Item "target/release/rust-m3u8" "target/release/rust-m3u8-${{ matrix.os }}-${{ matrix.arch }}"
-          }
-        shell: pwsh
+          toolchain: stable
+          target: ${{ matrix.target }}
 
-      - name: 上传产物
+      - name: 安装Linux静态编译依赖（解决GLIBC兼容核心依赖）
+        if: startsWith(matrix.run_os, 'ubuntu')
+        run: sudo apt update -y && sudo apt install -y musl-tools
+
+      - name: 执行Release模式跨平台编译
+        run: cargo build --release --target ${{ matrix.target }}
+
+      - name: 产物重命名 & 格式化处理（核心：自动去除tag的c-前缀）
+        shell: pwsh
+        run: |
+          # 核心：获取tag名称并自动移除 c- 前缀，比如 c-v1.0.0 → v1.0.0
+          $TAG_NAME = "${{ github.ref_name }}" -replace '^c-', ''
+          $OS_NAME = "${{ matrix.os }}"
+          $ARCH = "${{ matrix.arch }}"
+          $BINARY_BASE = "rust-m3u8"
+          # 严格按要求生成产物名称：rust-m3u8-${系统}-${架构}-${纯净tag名}[.exe]
+          $OUTPUT_NAME = "$BINARY_BASE-$OS_NAME-$ARCH-$TAG_NAME"
+          $TARGET_DIR = "${{ matrix.target }}"
+          $SOURCE_DIR = "target/$TARGET_DIR/release/"
+
+          # 按系统类型处理后缀和文件复制
+          if ($OS_NAME -eq "windows") {
+            $SOURCE_FILE = "$SOURCE_DIR$BINARY_BASE.exe"
+            $FINAL_FILE = "$OUTPUT_NAME.exe"
+            Copy-Item -Path $SOURCE_FILE -Destination $FINAL_FILE -Force
+          } else {
+            $SOURCE_FILE = "$SOURCE_DIR$BINARY_BASE"
+            $FINAL_FILE = "$OUTPUT_NAME"
+            Copy-Item -Path $SOURCE_FILE -Destination $FINAL_FILE -Force
+            # 给Linux/Mac产物赋予执行权限，下载即用
+            chmod +x $FINAL_FILE
+          }
+
+          # 打印产物信息，方便日志查看
+          Write-Host "✅ 编译产物生成成功：$FINAL_FILE"
+          ls -lh $FINAL_FILE
+
+      - name: 上传编译产物到GitHub Artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: rust-m3u8-${{ matrix.os }}-${{ matrix.arch }}
+          name: ${{ matrix.label }}-${{ github.ref_name - replace('^c-', '') }}
           path: |
-            target/release/rust-m3u8-*
-            !target/release/*.d
+            rust-m3u8-*
+            !rust-m3u8-*.d
