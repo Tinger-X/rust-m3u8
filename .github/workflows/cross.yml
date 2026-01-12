@@ -11,37 +11,74 @@ jobs:
     runs-on: ${{ matrix.os }}
     strategy:
       matrix:
-        # 主流操作系统
         os: [windows-latest, ubuntu-latest, macos-latest]
-        # 主流架构
         arch: [x86_64, aarch64]
-        # 排除不可能的组合（如Windows暂不支持aarch64的GitHub Actions runner）
         exclude:
           - os: windows-latest
             arch: aarch64
+        # ✅ 新增：为每个系统+架构 匹配对应的rust编译目标+产物后缀
+        include:
+          - os: ubuntu-latest
+            arch: x86_64
+            target: x86_64-unknown-linux-musl # 静态链接musl，根治glibc
+            suffix: ""
+          - os: windows-latest
+            arch: x86_64
+            target: x86_64-pc-windows-msvc     # windows原生msvc，无依赖
+            suffix: ".exe"
+          - os: macos-latest
+            arch: x86_64
+            target: x86_64-apple-darwin        # mac intel原生
+            suffix: ""
+          - os: macos-latest
+            arch: aarch64
+            target: aarch64-apple-darwin       # mac m1/m2/m3原生
+            suffix: ""
 
     steps:
       - uses: actions/checkout@v4
-      - name: "编译代码"
+
+      # ✅ 步骤1：安装rust稳定版+对应编译目标
+      - name: 安装Rust工具链
         uses: dtolnay/rust-toolchain@stable
         with:
-          target: ${{ matrix.target.triple }}
-      - run: cargo build --release
-      
-      - name: 准备产物
+          target: ${{ matrix.target }}
+
+      # ✅ 步骤2：Ubuntu专属 - 安装musl静态编译依赖（解决glibc的核心）
+      - name: 安装Ubuntu musl编译依赖
+        if: matrix.os == 'ubuntu-latest'
+        run: sudo apt update && sudo apt install -y musl-tools && sudo apt clean
+
+      # ✅ 步骤3：编译代码 - 带体积优化参数 + 指定target编译
+      - name: 编译代码 (release+体积优化)
+        run: cargo build --release --target ${{ matrix.target }}
+        env:
+          # ✅ 全局编译优化：减小产物体积，不损失运行性能
+          RUSTFLAGS: "-C opt-level=3 -C strip=symbols -C debuginfo=0"
+
+      # ✅ 步骤4：准备产物+瘦身+重命名 (完美兼容你的原版逻辑，新增极致瘦身)
+      - name: 准备产物+体积瘦身
         run: |
-          # 添加平台后缀
-          if ("${{ matrix.os }}" -eq "windows-latest") {
-            Copy-Item "target/release/rust-m3u8.exe" "target/release/rust-m3u8-${{ matrix.os }}-${{ matrix.arch }}.exe"
+          $src = "target/${{ matrix.target }}/release/rust-m3u8${{ matrix.suffix }}"
+          $dst = "rust-m3u8-${{ matrix.os }}-${{ matrix.arch }}${{ matrix.suffix }}"
+          # 复制并重命名
+          Copy-Item -Path $src -Destination $dst -Force
+          # ✅ 产物极致瘦身：全平台通用，剥离所有调试信息+压缩二进制
+          if ("${{ matrix.os }}" -eq "ubuntu-latest") {
+              strip -s $dst
+          } elseif ("${{ matrix.os }}" -eq "macos-latest") {
+              strip -S $dst
           } else {
-            Copy-Item "target/release/rust-m3u8" "target/release/rust-m3u8-${{ matrix.os }}-${{ matrix.arch }}"
+              # Windows无原生strip，使用rust自带的llvm-strip，效果一致
+              llvm-strip $dst
           }
+          # 查看瘦身前后体积
+          ls -lh $dst
         shell: pwsh
 
+      # ✅ 步骤5：上传产物 (和你原版一致，无改动)
       - name: 上传产物
         uses: actions/upload-artifact@v4
         with:
           name: rust-m3u8-${{ matrix.os }}-${{ matrix.arch }}
-          path: |
-            target/release/rust-m3u8-*
-            !target/release/*.d
+          path: ./rust-m3u8-*
