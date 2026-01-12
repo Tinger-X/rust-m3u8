@@ -1,4 +1,5 @@
-name: 主流平台编译
+# .github/workflows/cross_build.yml
+name: Rust-M3U8 跨平台编译
 
 on:
   push:
@@ -6,44 +7,11 @@ on:
       - "c-*"
 
 jobs:
-  build:
-    name: ${{ matrix.label }}
-    runs-on: ${{ matrix.run_os }}
-    strategy:
-      fail-fast: false # 单个平台失败不影响其他平台
-      matrix:
-        include:
-          # Windows x86_64 - 兼容Win10/Win11 全系版本，无依赖
-          - run_os: windows-latest
-            os: windows
-            arch: x86_64
-            target: x86_64-pc-windows-msvc
-            label: windows-x86_64
-          # Linux x86_64 静态编译 - 无GLIBC依赖，兼容Ubuntu18/20/22/24+全Linux发行版
-          - run_os: ubuntu-latest
-            os: linux
-            arch: x86_64
-            target: x86_64-unknown-linux-musl
-            label: linux-x86_64
-          # Linux aarch64 静态编译 - ARM64架构Linux设备通用
-          - run_os: ubuntu-latest
-            os: linux
-            arch: aarch64
-            target: aarch64-unknown-linux-musl
-            label: linux-aarch64
-          # MacOS x86_64 - Intel芯片Mac (2020及以前机型)
-          - run_os: macos-latest
-            os: macos
-            arch: x86_64
-            target: x86_64-apple-darwin
-            label: macos-x86_64
-          # MacOS aarch64 - M1/M2/M3芯片Mac (2021+全系新Mac)
-          - run_os: macos-latest
-            os: macos
-            arch: aarch64
-            target: aarch64-apple-darwin
-            label: macos-aarch64
-
+  cross-compile:
+    name: 跨平台编译
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
     steps:
       - name: 拉取项目源码
         uses: actions/checkout@v4
@@ -51,62 +19,86 @@ jobs:
       - name: 缓存Cargo依赖包
         uses: Swatinem/rust-cache@v2
         with:
-          workspaces: .
-          target: ${{ matrix.target }}
+          fetch-depth: 0
 
       - name: 配置Rust编译环境+指定目标架构
         uses: dtolnay/rust-toolchain@stable
         with:
-          toolchain: stable
-          target: ${{ matrix.target }}
+          targets: |
+            x86_64-unknown-linux-musl
+            x86_64-pc-windows-gnu
+            x86_64-pc-windows-msvc
+            x86_64-apple-darwin
+            aarch64-apple-darwin
 
-      - name: Linux 安装 openssl/musl
-        if: startsWith(matrix.run_os, 'ubuntu')
-        run: sudo apt update -y && sudo apt install -y musl-tools libssl-dev pkg-config
-
-      - name: MacOS 安装 openssl
-        if: startsWith(matrix.run_os, 'macos')
-        run: brew install openssl@3 pkg-config && echo "OPENSSL_DIR=$(brew --prefix openssl@3)" >> $GITHUB_ENV
-
-      - name: Windows 安装 openssl
-        if: startsWith(matrix.run_os, 'windows')
-        run: vcpkg install openssl:x64-windows && echo "OPENSSL_DIR=C:\vcpkg\installed\x64-windows" >> $env:GITHUB_ENV
-        shell: pwsh
-
-      - name: 执行Release模式编译
-        run: cargo build --release --target ${{ matrix.target }}
-
-      - name: 产物重命名
-        shell: pwsh
+      # 步骤3：安装编译依赖（Linux交叉编译必备）
+      - name: 安装Ubuntu编译依赖包
         run: |
-          # 核心：PowerShell正则去掉tag开头的c-前缀，如 c-v1.0.0 → v1.0.0
-          $RAW_TAG = "${{ github.ref_name }}"
-          $CLEAN_TAG = $RAW_TAG -replace '^c-', ''
-          
-          # 变量定义
-          $OS = "${{ matrix.os }}"
-          $ARCH = "${{ matrix.arch }}"
-          $BINARY_BASE = "rust-m3u8"
-          $TARGET_DIR = "${{ matrix.target }}"
-          $SRC_PATH = "target/$TARGET_DIR/release/"
+          sudo apt update && sudo apt install -y \
+            build-essential \
+            musl-tools \
+            mingw-w64 \
+            gcc-mingw-w64-x86-64 \
+            strip \
+            upx
 
-          # ✅ 严格按你的要求生成产物名：rust-m3u8-${系统}-${架构}-${纯净tag名}[.exe]
-          $FINAL_NAME = "$BINARY_BASE-$OS-$ARCH-$CLEAN_TAG"
+      # 步骤4：安装cargo-zigbuild (解决Linux编译macOS产物的SDK缺失问题)
+      - name: 安装cargo-zigbuild
+        run: cargo install cargo-zigbuild
 
-          # 分系统处理后缀和复制
-          if ($OS -eq "windows") {
-              Copy-Item -Path "$SRC_PATH$BINARY_BASE.exe" -Destination "$FINAL_NAME.exe" -Force
-              Write-Host "✅ Windows产物生成成功: $FINAL_NAME.exe"
-          } else {
-              Copy-Item -Path "$SRC_PATH$BINARY_BASE" -Destination "$FINAL_NAME" -Force
-              chmod +x $FINAL_NAME # Linux/Mac赋执行权限
-              Write-Host "✅ 产物生成成功: $FINAL_NAME"
-          }
+      # 用 Shell 语法提取TAG+剥离c-前缀
+      - name: 初始化环境变量 (修复语法错误)
+        run: |
+          # 提取原始tag名称 例如: c-v1.0.0
+          TAG_RAW="${{ github.ref_name }}"
+          # Shell原生语法 剥离开头的 c- 前缀，得到纯净版本号 例如: v1.0.0
+          TAG_NAME="${TAG_RAW#c-}"
+          # 写入环境变量供后续步骤使用
+          echo "TAG_RAW=${TAG_RAW}" >> $GITHUB_ENV
+          echo "TAG_NAME=${TAG_NAME}" >> $GITHUB_ENV
+          # 创建统一的产物输出目录
+          mkdir -p ./artifacts
 
-      - name: 上传编译产物
+      # ===================== 开始逐个编译所有目标平台 =====================
+      # 编译1: Linux x64 静态链接版 (无依赖，所有Linux发行版通用) ✅
+      - name: 编译 Linux x86_64 musl (静态)
+        run: |
+          cargo build --release --target x86_64-unknown-linux-musl
+          strip ./target/x86_64-unknown-linux-musl/release/rust-m3u8
+          cp ./target/x86_64-unknown-linux-musl/release/rust-m3u8 ./artifacts/rust-m3u8-x86_64-unknown-linux-musl-${{ env.TAG_NAME }}
+
+      # 编译2: Windows x64 MinGW版 (.exe) ✅
+      - name: 编译 Windows x64 gnu
+        run: |
+          cargo build --release --target x86_64-pc-windows-gnu
+          strip ./target/x86_64-pc-windows-gnu/release/rust-m3u8.exe
+          cp ./target/x86_64-pc-windows-gnu/release/rust-m3u8.exe ./artifacts/rust-m3u8-x86_64-pc-windows-gnu-${{ env.TAG_NAME }}.exe
+
+      # 编译3: Windows x64 MSVC原生版 (.exe，性能更好) ✅
+      - name: 编译 Windows x64 msvc
+        run: |
+          cargo build --release --target x86_64-pc-windows-msvc
+          strip ./target/x86_64-pc-windows-msvc/release/rust-m3u8.exe
+          cp ./target/x86_64-pc-windows-msvc/release/rust-m3u8.exe ./artifacts/rust-m3u8-x86_64-pc-windows-msvc-${{ env.TAG_NAME }}.exe
+
+      # 编译4: macOS x64 (Intel芯片) ✅
+      - name: 编译 macOS x86_64 (Intel)
+        run: |
+          cargo zigbuild --release --target x86_64-apple-darwin
+          strip ./target/x86_64-apple-darwin/release/rust-m3u8
+          cp ./target/x86_64-apple-darwin/release/rust-m3u8 ./artifacts/rust-m3u8-x86_64-apple-darwin-${{ env.TAG_NAME }}
+
+      # 编译5: macOS ARM64 (M1/M2/M3芯片) ✅
+      - name: 编译 macOS aarch64 (Apple Silicon)
+        run: |
+          cargo zigbuild --release --target aarch64-apple-darwin
+          strip ./target/aarch64-apple-darwin/release/rust-m3u8
+          cp ./target/aarch64-apple-darwin/release/rust-m3u8 ./artifacts/rust-m3u8-aarch64-apple-darwin-${{ env.TAG_NAME }}
+
+      # ===================== 编译完成，开始上传产物 =====================
+      - name: 上传编译产物到GitHub Artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: ${{ matrix.label }}
-          path: |
-            rust-m3u8-*
-            !rust-m3u8-*.d
+          name: rust-m3u8-cross-build-${{ env.TAG_NAME }}
+          path: ./artifacts/
+          retention-days: 90
