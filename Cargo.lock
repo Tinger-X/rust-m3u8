@@ -1098,7 +1098,7 @@ dependencies = [
 
 [[package]]
 name = "rust-m3u8"
-version = "1.2.3-beta-002"
+version = "1.2.3-beta-003"
 dependencies = [
  "anyhow",
  "clap",

@@ -4,24 +4,21 @@ name: Rust-M3U8 跨平台编译
 on:
   push:
     tags:
-      - "c-*"
+      - 'c-*'
 
 jobs:
   cross-compile:
     name: 跨平台编译
     runs-on: ubuntu-latest
     permissions:
-      contents: write
+      contents: write # 上传产物权限
     steps:
-      - name: 拉取项目源码
+      - name: 检出代码
         uses: actions/checkout@v4
-
-      - name: 缓存Cargo依赖包
-        uses: Swatinem/rust-cache@v2
         with:
           fetch-depth: 0
 
-      - name: 配置Rust编译环境+指定目标架构
+      - name: 安装Rust稳定版及目标平台
         uses: dtolnay/rust-toolchain@stable
         with:
           targets: |
@@ -31,77 +28,66 @@ jobs:
             x86_64-apple-darwin
             aarch64-apple-darwin
 
-      # 步骤3：安装编译依赖（Linux交叉编译必备）
-      - name: 安装Ubuntu编译依赖包
+      - name: 安装Ubuntu基础依赖
         run: |
-          sudo apt update && sudo apt install -y \
-            build-essential \
-            musl-tools \
-            mingw-w64 \
-            gcc-mingw-w64-x86-64
+          sudo apt update && sudo apt install -y build-essential musl-tools mingw-w64 gcc-mingw-w64-x86-64
           sudo apt clean
 
-      # 步骤4：缓存Cargo依赖包，无需重复下载
       - name: 缓存Cargo依赖
         uses: Swatinem/rust-cache@v2
         with:
           workspaces: ./ -> target
 
-      # 步骤5：安装cargo-zigbuild (解决Linux编译macOS产物的SDK缺失问题)
-      - name: 安装cargo-zigbuild
-        run: cargo install cargo-zigbuild
+      # ✅ 核心步骤1：安装 cross + 启动Docker服务
+      - name: 安装 cross 工具 (解决原生依赖交叉编译问题)
+        run: cargo install cross --git https://github.com/cross-rs/cross
 
-      # 用 Shell 语法提取TAG+剥离c-前缀
-      - name: 初始化环境变量 (修复语法错误)
+      # ✅ 无兼容问题的TAG提取+剥离前缀
+      - name: 初始化环境变量
         run: |
-          # 提取原始tag名称 例如: c-v1.0.0
           TAG_RAW="${{ github.ref_name }}"
-          # Shell原生语法 剥离开头的 c- 前缀，得到纯净版本号 例如: v1.0.0
           TAG_NAME="${TAG_RAW#c-}"
-          # 写入环境变量供后续步骤使用
           echo "TAG_RAW=${TAG_RAW}" >> $GITHUB_ENV
           echo "TAG_NAME=${TAG_NAME}" >> $GITHUB_ENV
-          # 创建统一的产物输出目录
           mkdir -p ./artifacts
 
-      # ===================== 开始逐个编译所有目标平台 =====================
-      # 编译1: Linux x64 静态链接版 (无依赖，所有Linux发行版通用) ✅
-      - name: 编译 Linux x86_64 musl (静态)
+      # 用 cross build 替换 cargo build
+      # ✅ 编译1: Linux x64 静态链接版
+      - name: 编译 Linux x86_64 musl
         run: |
-          cargo build --release --target x86_64-unknown-linux-musl
+          cross build --release --target x86_64-unknown-linux-musl
           strip ./target/x86_64-unknown-linux-musl/release/rust-m3u8
           cp ./target/x86_64-unknown-linux-musl/release/rust-m3u8 ./artifacts/rust-m3u8-x86_64-unknown-linux-musl-${{ env.TAG_NAME }}
 
-      # 编译2: Windows x64 MinGW版 (.exe) ✅
+      # ✅ 编译2: Windows x64 MinGW版 (.exe)
       - name: 编译 Windows x64 gnu
         run: |
-          cargo build --release --target x86_64-pc-windows-gnu
+          cross build --release --target x86_64-pc-windows-gnu
           strip ./target/x86_64-pc-windows-gnu/release/rust-m3u8.exe
           cp ./target/x86_64-pc-windows-gnu/release/rust-m3u8.exe ./artifacts/rust-m3u8-x86_64-pc-windows-gnu-${{ env.TAG_NAME }}.exe
 
-      # 编译3: Windows x64 MSVC原生版 (.exe，性能更好) ✅
+      # ✅ 编译3: Windows x64 MSVC原生版 (.exe，性能更好)
       - name: 编译 Windows x64 msvc
         run: |
-          cargo build --release --target x86_64-pc-windows-msvc
+          cross build --release --target x86_64-pc-windows-msvc
           strip ./target/x86_64-pc-windows-msvc/release/rust-m3u8.exe
           cp ./target/x86_64-pc-windows-msvc/release/rust-m3u8.exe ./artifacts/rust-m3u8-x86_64-pc-windows-msvc-${{ env.TAG_NAME }}.exe
 
-      # 编译4: macOS x64 (Intel芯片) ✅
+      # ✅ 编译4: macOS x64 (Intel芯片) - cross自动处理macOS SDK+openssl依赖
       - name: 编译 macOS x86_64 (Intel)
         run: |
-          cargo zigbuild --release --target x86_64-apple-darwin
+          cross build --release --target x86_64-apple-darwin
           strip ./target/x86_64-apple-darwin/release/rust-m3u8
           cp ./target/x86_64-apple-darwin/release/rust-m3u8 ./artifacts/rust-m3u8-x86_64-apple-darwin-${{ env.TAG_NAME }}
 
-      # 编译5: macOS ARM64 (M1/M2/M3芯片) ✅
+      # ✅ 编译5: macOS ARM64 (M1/M2/M3芯片)
       - name: 编译 macOS aarch64 (Apple Silicon)
         run: |
-          cargo zigbuild --release --target aarch64-apple-darwin
+          cross build --release --target aarch64-apple-darwin
           strip ./target/aarch64-apple-darwin/release/rust-m3u8
           cp ./target/aarch64-apple-darwin/release/rust-m3u8 ./artifacts/rust-m3u8-aarch64-apple-darwin-${{ env.TAG_NAME }}
 
-      # ===================== 编译完成，开始上传产物 =====================
-      - name: 上传编译产物到GitHub Artifacts
+      - name: 上传编译产物
         uses: actions/upload-artifact@v4
         with:
           name: rust-m3u8-cross-build-${{ env.TAG_NAME }}
