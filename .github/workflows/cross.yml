@@ -13,31 +13,31 @@ jobs:
       fail-fast: false # 单个平台编译失败，不影响其他平台编译
       matrix:
         include:
-          # Windows x86_64 - 兼容Win10/Win11 全系版本
+          # Windows x86_64 - 兼容Win10/Win11 全系
           - run_os: windows-latest
             os: windows
             arch: x86_64
             target: x86_64-pc-windows-msvc
             label: windows-x86_64
-          # Linux x86_64 - 静态编译 无GLIBC依赖，兼容Ubuntu18/20/22/24+全Linux发行版
+          # Linux x86_64 静态编译 - 无GLIBC依赖 全Linux通用
           - run_os: ubuntu-latest
             os: linux
             arch: x86_64
             target: x86_64-unknown-linux-musl
             label: linux-x86_64
-          # Linux aarch64 - 静态编译 ARM64架构Linux设备通用
+          # Linux aarch64 静态编译 - ARM64架构服务器/设备通用
           - run_os: ubuntu-latest
             os: linux
             arch: aarch64
             target: aarch64-unknown-linux-musl
             label: linux-aarch64
-          # MacOS x86_64 - Intel芯片（2020及以前Mac设备）
+          # MacOS x86_64 - Intel芯片Mac (2020及以前机型)
           - run_os: macos-latest
             os: macos
             arch: x86_64
             target: x86_64-apple-darwin
             label: macos-x86_64
-          # MacOS aarch64 - 苹果M1/M2/M3芯片（2021+新款Mac全系）
+          # MacOS aarch64 - M1/M2/M3芯片Mac (2021+全系新Mac)
           - run_os: macos-latest
             os: macos
             arch: aarch64
@@ -48,59 +48,64 @@ jobs:
       - name: 拉取项目源码
         uses: actions/checkout@v4
 
-      - name: 缓存Cargo依赖包（编译提速5-10倍，必备优化）
+      - name: 缓存Cargo依赖包 (编译提速5-10倍)
         uses: Swatinem/rust-cache@v2
         with:
           workspaces: .
           target: ${{ matrix.target }}
 
-      - name: 配置Rust编译环境 + 指定编译目标架构
+      - name: 配置Rust编译环境+指定目标架构
         uses: dtolnay/rust-toolchain@stable
         with:
           toolchain: stable
           target: ${{ matrix.target }}
 
-      - name: 安装Linux静态编译依赖（解决GLIBC版本兼容核心依赖）
+      - name: 安装Linux静态编译依赖
         if: startsWith(matrix.run_os, 'ubuntu')
         run: sudo apt update -y && sudo apt install -y musl-tools
 
       - name: 执行Release模式跨平台编译
         run: cargo build --release --target ${{ matrix.target }}
 
-      - name: 产物重命名 & 格式化处理（自动去除tag的c-前缀）
+      - name: 产物重命名
         shell: pwsh
         run: |
-          # 核心：去掉tag的c-前缀，c-v1.0.0 → v1.0.0，语法正确无报错
-          $TAG_NAME = "${{ github.ref_name }}" -replace '^c-', ''
-          $OS_NAME = "${{ matrix.os }}"
+          # 1. 原始tag名称(如c-v1.0.0)，用PowerShell正则精准去掉开头的c-前缀 ✔️
+          # ^c- 表示只匹配开头的c-，不会误替换tag内其他字符，绝对安全
+          $RAW_TAG = "${{ github.ref_name }}"
+          $CLEAN_TAG = $RAW_TAG -replace '^c-', ''
+          
+          # 2. 定义基础变量
+          $OS = "${{ matrix.os }}"
           $ARCH = "${{ matrix.arch }}"
-          $BINARY_BASE = "rust-m3u8"
-          # 产物命名规则：rust-m3u8-${系统}-${架构}-${纯净tag名}[.exe]
-          $OUTPUT_NAME = "$BINARY_BASE-$OS_NAME-$ARCH-$TAG_NAME"
+          $BINARY_NAME = "rust-m3u8"
           $TARGET_DIR = "${{ matrix.target }}"
-          $SOURCE_DIR = "target/$TARGET_DIR/release/"
+          $SRC_PATH = "target/$TARGET_DIR/release/"
 
-          # 按系统类型处理后缀和文件复制
-          if ($OS_NAME -eq "windows") {
-            $SOURCE_FILE = "$SOURCE_DIR$BINARY_BASE.exe"
-            $FINAL_FILE = "$OUTPUT_NAME.exe"
-            Copy-Item -Path $SOURCE_FILE -Destination $FINAL_FILE -Force
+          # 3. 严格按要求生成最终产物名：rust-m3u8-系统-架构-纯净tag名[.exe]
+          $FINAL_NAME = "$BINARY_NAME-$OS-$ARCH-$CLEAN_TAG"
+
+          # 4. 按系统处理文件后缀+复制+赋权
+          if ($OS -eq "windows") {
+              Copy-Item -Path "$SRC_PATH$BINARY_NAME.exe" -Destination "$FINAL_NAME.exe" -Force
+              Write-Host "✅ 生成产物: $FINAL_NAME.exe"
           } else {
-            $SOURCE_FILE = "$SOURCE_DIR$BINARY_BASE"
-            $FINAL_FILE = "$OUTPUT_NAME"
-            Copy-Item -Path $SOURCE_FILE -Destination $FINAL_FILE -Force
-            # 给Linux/Mac产物赋予执行权限，下载即用
-            chmod +x $FINAL_FILE
+              Copy-Item -Path "$SRC_PATH$BINARY_NAME" -Destination "$FINAL_NAME" -Force
+              chmod +x $FINAL_NAME
+              Write-Host "✅ 生成产物: $FINAL_NAME"
           }
 
-          # 打印产物信息，方便日志查看
-          Write-Host "✅ 编译产物生成成功：$FINAL_FILE"
-          ls -lh $FINAL_FILE
+          # 5. 把纯净的tag名写入临时文件，供后续上传步骤调用【关键：规避YAML表达式错误】
+          echo $CLEAN_TAG > clean_tag.txt
+          echo $FINAL_NAME > final_name.txt
 
-      - name: 上传编译产物到GitHub Artifacts
-        uses: actions/upload-artifact@v4
-        with:
-          name: ${{ matrix.label }}-${{ replace(github.ref_name, 'c-', '') }}
-          path: |
-            rust-m3u8-*
-            !rust-m3u8-*.d
+      - name: 上传编译产物到GitHub Artifacts【零语法错误】
+        shell: bash
+        run: |
+          # 读取临时文件中的纯净tag名，无任何YAML表达式处理，绝对合规
+          CLEAN_TAG=$(cat clean_tag.txt)
+          LABEL="${{ matrix.label }}"
+          # 上传产物，Artifact名称格式：平台-架构-纯净tag名
+          gh artifact upload "$LABEL-$CLEAN_TAG" --repo $GITHUB_REPOSITORY --file rust-m3u8-*!*.d
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
