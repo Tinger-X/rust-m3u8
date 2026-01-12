@@ -1,89 +1,72 @@
-name: 主流平台编译
+name: 主流平台编译（含 musl 静态 Linux）
 
 on:
   push:
     tags:
-      - "c-*"  # temp `cross build` tags
+      - "c-*"
 
 jobs:
   build:
-    name: ${{ matrix.os }}-${{ matrix.arch }}
-    runs-on: ${{ matrix.os }}
+    runs-on: ${{ matrix.runs_on }}
     strategy:
       matrix:
-        # 主流操作系统 - 保留你的原版配置
-        os: [windows-latest, ubuntu-latest, macos-latest]
-        # 主流架构 - 保留你的原版配置
-        arch: [x86_64, aarch64]
-        # 排除不可能的组合 - 保留你的原版配置
-        exclude:
-          - os: windows-latest
-            arch: aarch64
-        # ✅ 核心修复：为每一个合法的os+arch组合，绑定对应的标准Rust编译Target
-        # 这是解决target传参为空的唯一方法，也是根治GLIBC的关键
+        # 组合：为每个平台选择合适的 runner 和 target
         include:
-          - os: ubuntu-latest
-            arch: x86_64
-            target: x86_64-unknown-linux-musl  # 静态编译，彻底脱离GLIBC依赖
-          - os: windows-latest
-            arch: x86_64
-            target: x86_64-pc-windows-msvc      # Windows原生编译目标
-          - os: macos-latest
-            arch: x86_64
-            target: x86_64-apple-darwin         # Mac Intel原生编译目标
-          - os: macos-latest
-            arch: aarch64
-            target: aarch64-apple-darwin        # Mac M1/M2/M3原生编译目标
+          - os: windows
+            runs_on: windows-latest
+            target: x86_64-pc-windows-msvc
+          - os: macos
+            runs_on: macos-latest
+            target: x86_64-apple-darwin
+          - os: linux_glibc   # 如果你需要一个 glibc 动态构建（可选）
+            runs_on: ubuntu-22.04
+            target: x86_64-unknown-linux-gnu
+          - os: linux_musl_x86
+            runs_on: ubuntu-24.04   # 或 ubuntu-latest（用于构建 musl 也可）
+            target: x86_64-unknown-linux-musl
+          - os: linux_musl_aarch64
+            runs_on: ubuntu-24.04
+            target: aarch64-unknown-linux-musl
 
     steps:
       - uses: actions/checkout@v4
-      
-      # ✅ 修复这里的传参：原来是 matrix.target.triple 改为 matrix.target
-      - name: "编译代码"
-        uses: dtolnay/rust-toolchain@stable
+
+      - name: Setup Rust toolchain
+        uses: actions-rs/toolchain@v1
         with:
-          target: ${{ matrix.target }}
+          toolchain: stable
+          override: true
 
-      # ✅ Ubuntu专属：安装musl静态编译依赖（根治GLIBC必须，其他系统无需）
-      - name: 安装Ubuntu musl编译依赖
-        if: matrix.os == 'ubuntu-latest'
-        run: sudo apt update && sudo apt install -y musl-tools && sudo apt clean -y
-
-      # ✅ 编译命令 + 体积优化环境变量：--release + 指定target + 编译期瘦身
-      - run: cargo build --release --target ${{ matrix.target }}
-        env:
-          # 编译优化：减小体积，不损失任何性能，编译期剥离调试符号
-          RUSTFLAGS: "-C opt-level=3 -C strip=symbols -C debuginfo=0"
-      
-      # ✅ 完美保留你的原版pwsh脚本 + 修复产物路径 + 新增全平台产物瘦身（体积再减20%-40%）
-      - name: 准备产物
+      # 为 musl target 安装依赖（只在 musl 目标时执行）
+      - name: Install musl tools (for musl targets)
+        if: startsWith(matrix.target, 'x86_64-unknown-linux-musl') || startsWith(matrix.target, 'aarch64-unknown-linux-musl')
         run: |
-          # 修复产物路径：指定target后，产物在 target/目标名/release 目录下
-          $srcPath = "target/${{ matrix.target }}/release/"
-          $srcExe = $srcPath + "rust-m3u8.exe"
-          $srcBin = $srcPath + "rust-m3u8"
-          $dstName = "rust-m3u8-${{ matrix.os }}-${{ matrix.arch }}"
+          sudo apt-get update
+          sudo apt-get install -y musl-tools build-essential
+          rustup target add ${{ matrix.target }}
 
-          # 保留你原版的判断逻辑：区分Windows和其他系统
-          if ("${{ matrix.os }}" -eq "windows-latest") {
-            Copy-Item $srcExe "$dstName.exe" -Force
-            # Windows瘦身：使用rust自带的llvm-strip，无原生strip工具
-            llvm-strip "$dstName.exe"
-          } else {
-            Copy-Item $srcBin $dstName -Force
-            # Linux/Mac瘦身：原生strip工具，极致减小体积
-            if ("${{ matrix.os }}" -eq "ubuntu-latest") { strip -s $dstName }
-            if ("${{ matrix.os }}" -eq "macos-latest") { strip -S $dstName }
-          }
-          # 查看瘦身後的体积
-          ls -lh $dstName*
-        shell: pwsh
+      # 对于 glibc linux（如果需要）也可以显式添加 target
+      - name: Add target if needed
+        run: rustup target add ${{ matrix.target }} || true
 
-      # ✅ 完全保留你的原版上传产物配置，一字未改
-      - name: 上传产物
+      - name: Build release
+        env:
+          # 对于 musl 静态链接，有时需要这个 flag（按需）
+          RUSTFLAGS: ${{ env.RUSTFLAGS || '' }}
+        run: |
+          # musl 目标：静态构建（成果在 target/<target>/release）
+          cargo build --target ${{ matrix.target }} --release
+
+      - name: Prepare artifact (copy & name)
+        run: |
+          mkdir -p artifacts
+          case "${{ matrix.target }}" in
+            *windows*) cp "target/${{ matrix.target }}/release/rust-m3u8.exe" "artifacts/rust-m3u8-${{ matrix.os }}-${{ matrix.target }}.exe" || true ;;
+            *) cp "target/${{ matrix.target }}/release/rust-m3u8" "artifacts/rust-m3u8-${{ matrix.os }}-${{ matrix.target }}" || true ;;
+          esac
+
+      - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: rust-m3u8-${{ matrix.os }}-${{ matrix.arch }}
-          path: |
-            ./rust-m3u8-*
-            !target/release/*.d
+          name: rust-m3u8-${{ matrix.target }}
+          path: artifacts/*
