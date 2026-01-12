@@ -1,72 +1,53 @@
-name: 主流平台编译（含 musl 静态 Linux）
+name: 主流平台编译
 
 on:
   push:
     tags:
-      - "c-*"
+      - "c-*"  # temp `cross build` tags
 
 jobs:
   build:
-    runs-on: ${{ matrix.runs_on }}
+    name: ${{ matrix.os }}-${{ matrix.arch }}
+    runs-on: ${{ matrix.os }}
     strategy:
       matrix:
-        # 组合：为每个平台选择合适的 runner 和 target
-        include:
-          - os: windows
-            runs_on: windows-latest
-            target: x86_64-pc-windows-msvc
-          - os: macos
-            runs_on: macos-latest
-            target: x86_64-apple-darwin
-          - os: linux_glibc   # 如果你需要一个 glibc 动态构建（可选）
-            runs_on: ubuntu-22.04
-            target: x86_64-unknown-linux-gnu
-          - os: linux_musl_x86
-            runs_on: ubuntu-24.04   # 或 ubuntu-latest（用于构建 musl 也可）
-            target: x86_64-unknown-linux-musl
-          - os: linux_musl_aarch64
-            runs_on: ubuntu-24.04
-            target: aarch64-unknown-linux-musl
+        # 主流操作系统
+        os: 
+          - windows-latest
+          - ubuntu-18.04
+          - ubuntu-20.04
+          - ubuntu-22.04
+          - ubuntu-24.04
+          - macos-latest
+        # 主流架构
+        arch: [x86_64, aarch64]
+        # 排除不可能的组合（如Windows暂不支持aarch64的GitHub Actions runner）
+        exclude:
+          - os: windows-latest
+            arch: aarch64
 
     steps:
       - uses: actions/checkout@v4
-
-      - name: Setup Rust toolchain
-        uses: actions-rs/toolchain@v1
+      - name: "编译代码"
+        uses: dtolnay/rust-toolchain@stable
         with:
-          toolchain: stable
-          override: true
-
-      # 为 musl target 安装依赖（只在 musl 目标时执行）
-      - name: Install musl tools (for musl targets)
-        if: startsWith(matrix.target, 'x86_64-unknown-linux-musl') || startsWith(matrix.target, 'aarch64-unknown-linux-musl')
+          target: ${{ matrix.target.triple }}
+      - run: cargo build --release
+      
+      - name: 准备产物
         run: |
-          sudo apt-get update
-          sudo apt-get install -y musl-tools build-essential
-          rustup target add ${{ matrix.target }}
+          # 添加平台后缀
+          if ("${{ matrix.os }}" -eq "windows-latest") {
+            Copy-Item "target/release/rust-m3u8.exe" "target/release/rust-m3u8-${{ matrix.os }}-${{ matrix.arch }}.exe"
+          } else {
+            Copy-Item "target/release/rust-m3u8" "target/release/rust-m3u8-${{ matrix.os }}-${{ matrix.arch }}"
+          }
+        shell: pwsh
 
-      # 对于 glibc linux（如果需要）也可以显式添加 target
-      - name: Add target if needed
-        run: rustup target add ${{ matrix.target }} || true
-
-      - name: Build release
-        env:
-          # 对于 musl 静态链接，有时需要这个 flag（按需）
-          RUSTFLAGS: ${{ env.RUSTFLAGS || '' }}
-        run: |
-          # musl 目标：静态构建（成果在 target/<target>/release）
-          cargo build --target ${{ matrix.target }} --release
-
-      - name: Prepare artifact (copy & name)
-        run: |
-          mkdir -p artifacts
-          case "${{ matrix.target }}" in
-            *windows*) cp "target/${{ matrix.target }}/release/rust-m3u8.exe" "artifacts/rust-m3u8-${{ matrix.os }}-${{ matrix.target }}.exe" || true ;;
-            *) cp "target/${{ matrix.target }}/release/rust-m3u8" "artifacts/rust-m3u8-${{ matrix.os }}-${{ matrix.target }}" || true ;;
-          esac
-
-      - name: Upload artifact
+      - name: 上传产物
         uses: actions/upload-artifact@v4
         with:
-          name: rust-m3u8-${{ matrix.target }}
-          path: artifacts/*
+          name: rust-m3u8-${{ matrix.os }}-${{ matrix.arch }}
+          path: |
+            target/release/rust-m3u8-*
+            !target/release/*.d
