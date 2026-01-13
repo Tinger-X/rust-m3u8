@@ -109,7 +109,7 @@ impl MediaParser {
         playlist.ads_count = ads_count;
 
         if playlist.segments.is_empty() {
-            return Err(M3u8Error::ParseError("未找到有效的视频片段".to_string()));
+            return Err(M3u8Error::EmptyError("未找到有效的视频片段".to_string()));
         }
 
         Ok(playlist)

@@ -66,7 +66,7 @@ impl MasterParser {
         }
 
         if playlist.variants.is_empty() {
-            return Err(M3u8Error::ParseError("未找到有效的变体流".to_string()));
+            return Err(M3u8Error::EmptyError("未找到有效的变体流".to_string()));
         }
 
         Ok(playlist)

@@ -15,8 +15,7 @@ impl ContentParser {
             .map(|pattern| Regex::new(pattern))
             .collect();
 
-        let compiled_filters = compiled_filters
-            .map_err(|e| M3u8Error::ParseError(format!("正则表达式编译失败: {}", e)))?;
+        let compiled_filters = compiled_filters.map_err(|e| M3u8Error::RegexError(e))?;
 
         Ok(Self {
             ad_filters: compiled_filters,

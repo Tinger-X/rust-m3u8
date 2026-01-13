@@ -77,7 +77,7 @@ fn create_client_pool(
             // 如果有代理配置，为每个客户端随机选择一个代理
             if let Some(proxy_url) = proxy_config.get_random_proxy() {
                 let proxy = reqwest::Proxy::all(proxy_url)
-                    .map_err(|e| M3u8Error::ParseError(format!("代理配置错误: {}", e)))?;
+                    .map_err(|e| M3u8Error::ProxyError(e.to_string()))?;
                 client_builder.proxy(proxy).build()?
             } else {
                 client_builder.build()?
@@ -182,7 +182,7 @@ impl M3u8Downloader {
         let segments = nested
             .get_selected_variant()
             .map(|playlist| &playlist.segments)
-            .ok_or_else(|| M3u8Error::ParseError("未找到有效的播放列表片段".to_string()))?;
+            .ok_or_else(|| M3u8Error::EmptyError("无效的视频列表".to_string()))?;
         self.download_segments(segments).await?;
         let merger = VideoMerger::new(&self.temp_dir, &self.output_path, segments.len()).await?;
         if self.simple {
@@ -228,7 +228,7 @@ impl M3u8Downloader {
                 .unwrap()
                 .progress_chars("⣿⣷⣶⣦⣤⣄⣀ "),
         );
-        progress_bar.set_message("...");
+        progress_bar.set_message("1.00MB/s");
 
         let progress_bar = Arc::new(progress_bar);
         let total_bytes_clone = Arc::clone(&total_bytes);
@@ -282,8 +282,10 @@ impl M3u8Downloader {
                 )
                 .await;
 
-                // 无论成功与否，都更新进度条
-                progress_bar_task.inc(1);
+                // 仅在成功时更新进度条
+                if result.is_ok() {
+                    progress_bar_task.inc(1);
+                }
                 result
             });
         }
@@ -297,25 +299,20 @@ impl M3u8Downloader {
                 }
                 Err(join_error) => {
                     // 如果任务本身失败（比如 panic），记录错误
-                    download_results.push(Err(M3u8Error::ParseError(format!(
-                        "下载任务异常: {}",
-                        join_error
-                    ))));
+                    download_results.push(Err(M3u8Error::DownloadError(join_error.to_string())));
                 }
             }
         }
-
         speed_update_handle.abort();
 
+        // 检查所有下载结果，有失败则抛出第一个错误
+        for result in download_results {
+            result?;
+        }
         progress_bar.finish_with_message(format!(
             "✅ 下载完成! 总下载量: {}\n",
             format_size(total_bytes.load(Ordering::Relaxed), None)
         ));
-
-        // 检查所有下载结果
-        for result in download_results {
-            result?;
-        }
 
         Ok(())
     }
@@ -351,10 +348,7 @@ impl M3u8Downloader {
                 Err(e) => {
                     retry_count += 1;
                     if retry_count >= max_retries {
-                        eprintln!(
-                            "❌ 下载片段 {} 失败 (重试 {} 次): {}",
-                            segment.sequence, max_retries, e
-                        );
+                        eprintln!("❌ 片段 [{}] {}", segment.sequence, e);
                         return Err(e);
                     }
                     tokio::time::sleep(tokio::time::Duration::from_millis(
@@ -380,7 +374,7 @@ impl M3u8Downloader {
         let _permit = client_semaphore
             .acquire()
             .await
-            .map_err(|e| M3u8Error::ParseError(format!("获取客户端许可失败: {}", e)))?;
+            .map_err(|e| M3u8Error::DownloadError(format!("无法获取信号量: {}", e)))?;
 
         // 从客户端池中随机选择一个客户端
         let client_index = rand::random::<usize>() % client_pool.len();
@@ -388,9 +382,10 @@ impl M3u8Downloader {
         let response = client.get(url).headers(headers.clone()).send().await?;
 
         if !response.status().is_success() {
-            return Err(M3u8Error::ParseError(format!(
-                "HTTP 请求失败: {}",
-                response.status()
+            return Err(M3u8Error::DownloadError(format!(
+                "{} \"{}\"",
+                response.status(),
+                url
             )));
         }
 

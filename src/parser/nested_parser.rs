@@ -40,7 +40,7 @@ impl NestedParser {
     ) -> Result<NestedM3u8, M3u8Error> {
         let content = tokio::fs::read_to_string(file_path)
             .await
-            .map_err(|e| M3u8Error::Io(e))?;
+            .map_err(|e| M3u8Error::IoError(e))?;
 
         self.parse_content(&content, base_url, &client).await
     }

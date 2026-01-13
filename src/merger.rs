@@ -22,16 +22,13 @@ impl VideoMerger {
         for index in 0..segments {
             let segment_path = temp_dir.join(format!("seg{:06}.ts", index));
             if !segment_path.exists() {
-                return Err(M3u8Error::MergeError(format!(
-                    "片段文件不存在: {:?}",
-                    segment_path
-                )));
+                return Err(M3u8Error::FileNotFoundError(segment_path));
             }
 
             // 获取绝对路径并转换为 FFmpeg 兼容格式
             let absolute_path = segment_path
                 .canonicalize()
-                .map_err(|e| M3u8Error::MergeError(format!("无法获取绝对路径: {}", e)))?;
+                .map_err(|e| M3u8Error::IoError(e))?;
 
             // 在 Windows 上将反斜杠转换为正斜杠，FFmpeg 更好地支持正斜杠
             let path_str = absolute_path.to_string_lossy().replace('\\', "/");

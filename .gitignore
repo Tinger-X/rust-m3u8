@@ -1,7 +1,6 @@
 /target
 /release
-/temp
 /.vscode
-/.codebuddy
 
 *.mp4
+.tmp_*
