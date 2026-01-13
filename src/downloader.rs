@@ -184,15 +184,11 @@ impl M3u8Downloader {
             .map(|playlist| &playlist.segments)
             .ok_or_else(|| M3u8Error::ParseError("未找到有效的播放列表片段".to_string()))?;
         self.download_segments(segments).await?;
-        let merger = VideoMerger::new();
+        let merger = VideoMerger::new(&self.temp_dir, &self.output_path, segments.len()).await?;
         if self.simple {
-            merger
-                .merge_with_rust(&self.temp_dir, &self.output_path, segments)
-                .await?;
+            merger.merge_with_rust().await?;
         } else {
-            merger
-                .merge_with_ffmpeg(&self.temp_dir, &self.output_path, segments)
-                .await?;
+            merger.merge_with_ffmpeg().await?;
         }
         if !self.keep_temp {
             fs::remove_dir_all(&self.temp_dir).await?;

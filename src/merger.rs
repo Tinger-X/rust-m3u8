@@ -1,61 +1,26 @@
 use crate::error::M3u8Error;
-use crate::types::M3u8Segment;
 use std::path::PathBuf;
 use tokio::fs;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
-pub struct VideoMerger;
+pub struct VideoMerger {
+    temp_dir: PathBuf,
+    output_path: PathBuf,
+    segments: usize,
+}
 
 impl VideoMerger {
-    pub fn new() -> Self {
-        Self
-    }
-
-    pub async fn merge_with_rust(
-        &self,
+    pub async fn new(
         temp_dir: &PathBuf,
         output_path: &PathBuf,
-        segments: &[M3u8Segment],
-    ) -> Result<(), M3u8Error> {
-        let mut output_file = fs::File::create(output_path).await?;
-
-        for index in 0..segments.len() {
-            let segment_path = temp_dir.join(format!("seg{:06}.ts", index));
-
-            if !segment_path.exists() {
-                return Err(M3u8Error::MergeError(format!(
-                    "片段文件不存在: {:?}",
-                    segment_path
-                )));
-            }
-
-            let mut segment_file = fs::File::open(&segment_path).await?;
-            let mut buffer = Vec::new();
-            segment_file.read_to_end(&mut buffer).await?;
-
-            output_file.write_all(&buffer).await?;
-        }
-
-        output_file.flush().await?;
-        println!("✅ 成功合并 {} 个片段到 {:?}", segments.len(), output_path);
-
-        Ok(())
-    }
-
-    pub async fn merge_with_ffmpeg(
-        &self,
-        temp_dir: &PathBuf,
-        output_path: &PathBuf,
-        segments: &[M3u8Segment],
-    ) -> Result<(), M3u8Error> {
-        // 创建文件列表
+        segments: usize,
+    ) -> Result<Self, M3u8Error> {
+        // 创建file_list.txt
         let file_list_path = temp_dir.join("file_list.txt");
         let mut file_list_content = String::new();
 
-        // 检查所有片段文件是否存在，并创建文件列表
-        for index in 0..segments.len() {
+        for index in 0..segments {
             let segment_path = temp_dir.join(format!("seg{:06}.ts", index));
-
             if !segment_path.exists() {
                 return Err(M3u8Error::MergeError(format!(
                     "片段文件不存在: {:?}",
@@ -72,11 +37,47 @@ impl VideoMerger {
             let path_str = absolute_path.to_string_lossy().replace('\\', "/");
             file_list_content.push_str(&format!("file '{}'\n", path_str));
         }
-
         // 写入文件列表
         fs::write(&file_list_path, file_list_content).await?;
 
+        // 确保output_path的文件夹存在，不存在则创建
+        if let Some(parent) = output_path.parent() {
+            if !parent.exists() {
+                fs::create_dir_all(parent).await?;
+            }
+        }
+
+        Ok(Self {
+            temp_dir: temp_dir.clone(),
+            output_path: output_path.clone(),
+            segments: segments,
+        })
+    }
+
+    pub async fn merge_with_rust(&self) -> Result<(), M3u8Error> {
+        let mut output_file = fs::File::create(&self.output_path).await?;
+
+        for index in 0..self.segments {
+            let segment_path = self.temp_dir.join(format!("seg{:06}.ts", index));
+            let mut segment_file = fs::File::open(&segment_path).await?;
+            let mut buffer = Vec::new();
+            segment_file.read_to_end(&mut buffer).await?;
+
+            output_file.write_all(&buffer).await?;
+        }
+
+        output_file.flush().await?;
+        println!(
+            "✅ 成功合并 {} 个片段到 {:?}",
+            self.segments, self.output_path
+        );
+
+        Ok(())
+    }
+
+    pub async fn merge_with_ffmpeg(&self) -> Result<(), M3u8Error> {
         // 使用 ffmpeg 合并
+        let file_list_path = self.temp_dir.join("file_list.txt");
         let output = std::process::Command::new("ffmpeg")
             .args(&[
                 "-f",
@@ -88,7 +89,7 @@ impl VideoMerger {
                 "-c",
                 "copy",
                 "-y",
-                output_path.to_str().unwrap(),
+                self.output_path.to_str().unwrap(),
             ])
             .output();
 
@@ -102,13 +103,16 @@ impl VideoMerger {
                     );
 
                     // 回退到简单合并
-                    return self.merge_with_rust(temp_dir, output_path, segments).await;
+                    return self.merge_with_rust().await;
                 }
-                println!("✅ 成功合并 {} 个片段到 {:?}", segments.len(), output_path);
+                println!(
+                    "✅ 成功合并 {} 个片段到 {:?}",
+                    self.segments, self.output_path
+                );
             }
             Err(e) => {
                 println!("⚠️  FFmpeg 不可用，使用简单合并: {}", e);
-                return self.merge_with_rust(temp_dir, output_path, segments).await;
+                return self.merge_with_rust().await;
             }
         }
 

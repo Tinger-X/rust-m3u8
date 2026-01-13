@@ -60,7 +60,8 @@ impl NestedParser {
         match playlist_type {
             PlaylistType::Master => {
                 // 这是主播放列表，需要递归解析所有变体流
-                self.parse_master_playlist(content, &base_url_obj, client).await
+                self.parse_master_playlist(content, &base_url_obj, client)
+                    .await
             }
             PlaylistType::Media => {
                 // 这是媒体播放列表，直接包装为嵌套结构
